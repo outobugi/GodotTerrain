@@ -1,0 +1,230 @@
+[gd_scene load_steps=11 format=3 uid="uid://c5uv4atbb75k8"]
+
+[ext_resource type="Script" path="res://addons/terrain_3d/ui/tools.gd" id="1_6lpwp"]
+[ext_resource type="Texture2D" uid="uid://g84p30cseaq1" path="res://addons/terrain_3d/icons/icon_height_brush.svg" id="2_42756"]
+[ext_resource type="ButtonGroup" uid="uid://dmi8ebigmrcfy" path="res://addons/terrain_3d/ui/tool_group.tres" id="2_wfina"]
+[ext_resource type="Texture2D" uid="uid://ccji2p2kgqa0m" path="res://addons/terrain_3d/icons/icon_brush.svg" id="3_vhfbk"]
+[ext_resource type="Texture2D" uid="uid://bc71eb2kg0rja" path="res://addons/terrain_3d/brush/brush_default.png" id="5_61yus"]
+[ext_resource type="ButtonGroup" uid="uid://d3q3k6fu1ppd4" path="res://addons/terrain_3d/ui/shape_group.tres" id="5_q5m56"]
+[ext_resource type="Texture2D" uid="uid://btgluhppmkdhn" path="res://addons/terrain_3d/brush/brush_sharp.png" id="6_2dm3q"]
+[ext_resource type="Texture2D" uid="uid://dxh1mvsdxt2gb" path="res://addons/terrain_3d/brush/brush_rugged_01.png" id="7_5grey"]
+[ext_resource type="Texture2D" uid="uid://2lsmimrsutq1" path="res://addons/terrain_3d/brush/brush_rugged_02.png" id="8_faq3e"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_knurg"]
+bg_color = Color(0.6, 0.6, 0.6, 0.243137)
+
+[node name="Tools" type="VBoxContainer"]
+custom_minimum_size = Vector2(228, 0)
+anchors_preset = -1
+anchor_right = 0.156
+anchor_bottom = 0.4
+offset_right = 28.288
+offset_bottom = 75.8
+script = ExtResource("1_6lpwp")
+
+[node name="Label2" type="Label" parent="."]
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_knurg")
+text = "Terrain Tools"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Buttons" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="Buttons"]
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+text = "Brush"
+
+[node name="ToolHeight" type="Button" parent="Buttons"]
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 4
+tooltip_text = "Paint Height"
+toggle_mode = true
+button_pressed = true
+button_group = ExtResource("2_wfina")
+icon = ExtResource("2_42756")
+icon_alignment = 1
+
+[node name="ToolSplat" type="Button" parent="Buttons"]
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 4
+tooltip_text = "Paint Textures"
+toggle_mode = true
+button_group = ExtResource("2_wfina")
+icon = ExtResource("3_vhfbk")
+icon_alignment = 1
+
+[node name="Label" type="Label" parent="."]
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_knurg")
+text = "Brush Settings"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="BrushSize" type="HBoxContainer" parent="."]
+layout_mode = 2
+alignment = 1
+
+[node name="Label" type="Label" parent="BrushSize"]
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+text = "Size"
+
+[node name="Slider" type="HSlider" parent="BrushSize"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 512.0
+value = 64.0
+
+[node name="Value" type="Label" parent="BrushSize"]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+text = "64"
+horizontal_alignment = 1
+clip_text = true
+
+[node name="BrushOpacity" type="HBoxContainer" parent="."]
+layout_mode = 2
+alignment = 1
+
+[node name="Label" type="Label" parent="BrushOpacity"]
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+text = "Opacity"
+
+[node name="Slider" type="HSlider" parent="BrushOpacity"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.01
+value = 0.1
+
+[node name="Value" type="Label" parent="BrushOpacity"]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+text = "0.1"
+horizontal_alignment = 1
+clip_text = true
+
+[node name="BrushShape" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="BrushShape"]
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+text = "Shape"
+
+[node name="GridContainer" type="GridContainer" parent="BrushShape"]
+layout_mode = 2
+columns = 4
+
+[node name="Button" type="Button" parent="BrushShape/GridContainer"]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+toggle_mode = true
+button_pressed = true
+button_group = ExtResource("5_q5m56")
+icon = ExtResource("5_61yus")
+expand_icon = true
+
+[node name="Button2" type="Button" parent="BrushShape/GridContainer"]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+toggle_mode = true
+button_group = ExtResource("5_q5m56")
+icon = ExtResource("6_2dm3q")
+expand_icon = true
+
+[node name="Button3" type="Button" parent="BrushShape/GridContainer"]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+toggle_mode = true
+button_group = ExtResource("5_q5m56")
+icon = ExtResource("7_5grey")
+expand_icon = true
+
+[node name="Button4" type="Button" parent="BrushShape/GridContainer"]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+toggle_mode = true
+button_group = ExtResource("5_q5m56")
+icon = ExtResource("8_faq3e")
+expand_icon = true
+
+[node name="BrushHeight" type="HBoxContainer" parent="."]
+layout_mode = 2
+alignment = 1
+
+[node name="Label" type="Label" parent="BrushHeight"]
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+text = "Height"
+
+[node name="Slider" type="HSlider" parent="BrushHeight"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.01
+value = 1.0
+
+[node name="Value" type="Label" parent="BrushHeight"]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+text = "1"
+horizontal_alignment = 1
+clip_text = true
+
+[node name="TexLayersLabel" type="Label" parent="."]
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_knurg")
+text = "Texture Layers"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="TextureLayersNormals" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="Label3" type="Label" parent="TextureLayersNormals"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Show Normals"
+autowrap_mode = 2
+
+[node name="Show" type="CheckBox" parent="TextureLayersNormals"]
+layout_mode = 2
+size_flags_horizontal = 3
+disabled = true
+text = "On"
+
+[node name="TextureLayersDetails" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="Label3" type="Label" parent="TextureLayersDetails"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Show Details"
+autowrap_mode = 2
+
+[node name="Show" type="CheckBox" parent="TextureLayersDetails"]
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "TODO"
+disabled = true
+text = "On"
+
+[node name="TextureLayers" type="ScrollContainer" parent="."]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Layers" type="VBoxContainer" parent="TextureLayers"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
