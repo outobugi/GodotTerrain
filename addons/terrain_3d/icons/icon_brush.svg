@@ -5,7 +5,7 @@
    version="1.1"
    viewBox="0 0 16 16"
    id="svg2"
-   inkscape:version="1.1.1 (3bf5ae0d25, 2021-09-20)"
+   inkscape:version="1.1.2 (b8e25be833, 2022-02-05)"
    sodipodi:docname="icon_brush.svg"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
@@ -41,8 +41,8 @@
      id="namedview8"
      showgrid="true"
      inkscape:zoom="16.000001"
-     inkscape:cx="11.218749"
-     inkscape:cy="14.906249"
+     inkscape:cx="3.1562498"
+     inkscape:cy="13.562499"
      inkscape:window-x="-8"
      inkscape:window-y="-8"
      inkscape:window-maximized="1"
@@ -59,7 +59,7 @@
   </sodipodi:namedview>
   <path
      id="path4144"
-     style="fill:#fc9c9c;fill-opacity:0.996078;fill-rule:evenodd;stroke:none;stroke-width:1.56663px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+     style="fill:#fc7f7f;fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:1.56663px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
      d="M 14.959707,1.2409489 5.7960794,8.6181187 4.3078021,10.646406 5.5794446,11.873036 7.9754201,10.44551 14.81023,4.3529208 Z M 3.6578989,11.363067 0.77016529,14.38425 3.7599713,14.59858 5.2761572,12.848546 Z"
      sodipodi:nodetypes="cccccccccccc" />
 </svg>

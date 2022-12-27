@@ -1,11 +1,12 @@
 @tool
 extends VBoxContainer
 
-signal texture_changed(texture: Texture2D, index: int, is_albedo: bool)
+# A lot of duplicate code and bad naming and no comments
 
 enum ToolMode {
 	HEIGHT,
-	SPLAT,
+	TEXTURE,
+	PARTICLE
 }
 
 const MAX_BRUSH_SIZE: int = 512
@@ -30,13 +31,17 @@ var texture_layer_buttons: Array[Button]
 @onready var brush_shape_list = get_node("BrushShape/GridContainer")
 
 @onready var tool_paint_height = get_node("Buttons/ToolHeight")
-@onready var tool_paint_splat = get_node("Buttons/ToolSplat")
+@onready var tool_paint_texture = get_node("Buttons/ToolTexture")
+@onready var tool_paint_multimesh = get_node("Buttons/ToolMultiMesh")
 
-@onready var texture_layers_normals = get_node("TextureLayersNormals/Show")
-@onready var texture_layers_details = get_node("TextureLayersDetails/Show")
-@onready var texture_layers_control = get_node("TextureLayers/Layers")
+@onready var texture_layers_control = get_node("TextureLayers")
+@onready var texture_layers_list = texture_layers_control.get_node("LayersContainer/Layers")
+@onready var texture_layer_error = texture_layers_control.get_node("LayerError")
 
-func _ready():
+@onready var mesh_layers_control = get_node("MeshLayers")
+@onready var mesh_layers_list = mesh_layers_control.get_node("LayersContainer/Layers")
+
+func init_tools():
 	brush_size_slider.connect("value_changed", brush_size_changed)
 	brush_opacity_slider.connect("value_changed", brush_opacity_changed)
 	brush_height_slider.connect("value_changed", brush_height_changed)
@@ -53,11 +58,10 @@ func _ready():
 	set_brush_height(brush_height)
 	
 	tool_paint_height.connect("toggled", set_tool_mode.bind(ToolMode.HEIGHT))
-	tool_paint_splat.connect("toggled", set_tool_mode.bind(ToolMode.SPLAT))
+	tool_paint_texture.connect("toggled", set_tool_mode.bind(ToolMode.TEXTURE))
+	tool_paint_multimesh.connect("toggled", set_tool_mode.bind(ToolMode.PARTICLE))
 	tool_paint_height.set_pressed(true)
 	set_tool_mode(true, ToolMode.HEIGHT)
-	
-	texture_layers_normals.connect("toggled", toggle_normalmap_picker)
 	
 	brush_shape_button_group = brush_shape_list.get_child(0).get_button_group()
 	
@@ -67,17 +71,16 @@ func set_tool_mode(toggle: bool, mode: ToolMode):
 	
 	texture_layers_control.hide()
 	brush_height_control.hide()
-	texture_layers_normals.set_disabled(true)
-	texture_layers_details.set_disabled(true)
-	
+	mesh_layers_control.hide()
+
 	match mode:
 		ToolMode.HEIGHT:
 			brush_height_control.show()
-		ToolMode.SPLAT:
+		ToolMode.TEXTURE:
 			texture_layers_control.show()
-			texture_layers_normals.set_disabled(false)
-			texture_layers_details.set_disabled(false)
-
+		ToolMode.PARTICLE:
+			mesh_layers_control.show()
+			
 func set_brush_size(value):
 	brush_size_slider.set_value(value)
 	
@@ -114,63 +117,173 @@ func brush_height_changed(new_value):
 	brush_height = new_value
 	brush_height_value.set_text(str(new_value))
 	
-func toggle_normalmap_picker(toggle: bool):
-	for control in texture_layers_control.get_children():
-		if control.get_child_count() > 0:
-			control.get_child(2).visible = toggle
-
-func on_texture_selected(toggle: bool, idx: int):
-	for i in texture_layer_buttons.size():
-		if i != idx:
-			texture_layer_buttons[i].set_pressed_no_signal(false)
-	texture_layer = idx + 1
+func _on_texture_selected(id: int):
+	for layer in texture_layers_list.get_children():
+		if layer.id != id:
+			layer.set_selected(false)
+	texture_layer = id + 1
 	
-func on_albedo_changed(tex: Texture2D, idx: int):
-	emit_signal("texture_changed", tex, idx, true)
+func clear_texture_layers():
+	for node in texture_layers_list.get_children():
+		if node is TextureLayerContainer:
+			node.queue_free()
+			
+func clear_mesh_layers():
+	for node in mesh_layers_list.get_children():
+		if node is MeshLayerContainer:
+			node.queue_free()
 	
-func on_normalmap_changed(tex: Texture2D, idx: int):
-	emit_signal("texture_changed", tex, idx, false)
-
-func load_textures(albedo_arr: Array, normal_arr: Array):
+func load_textures(data: Array, callback: Callable):
+	clear_texture_layers()
 	
-	var has_texture_layers: bool = texture_layers_control.get_child_count() > 0
+	if data.is_empty():
+		return
 	
-	for i in 16:
+	var albedo_arr: Array = data[0]
+	var normal_arr: Array = data[1]
+	
+	var layer_count: int = albedo_arr.size()
+	var show_next_empty: bool = false
+	
+	for i in layer_count:
+		var layer: TextureLayerContainer = TextureLayerContainer.new(i)
+		var albedo: Texture2D = albedo_arr[i]
+		var normal: Texture2D = null
 		
-		var albedo_picker: EditorResourcePicker
-		var normal_picker: EditorResourcePicker
+		if i < normal_arr.size():
+			normal = normal_arr[i]
 		
-		if !has_texture_layers:
-			var hbox: HBoxContainer = HBoxContainer.new()
-			
-			albedo_picker = EditorResourcePicker.new()
-			albedo_picker.connect("resource_changed", on_albedo_changed.bind(i))
-			albedo_picker.set_toggle_mode(true)
-			var texture_button: Button = albedo_picker.get_child(0)
-			texture_layer_buttons.append(texture_button)
-			texture_button.connect("toggled", on_texture_selected.bind(i))
-			
-			normal_picker = EditorResourcePicker.new()
-			normal_picker.connect("resource_changed", on_normalmap_changed.bind(i))
-			normal_picker.hide()
-			var label: Label = Label.new()
-			label.set_text("Layer "+ str(i+1))
-			
-			label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-			albedo_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			normal_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			
-			hbox.add_child(label)
-			hbox.add_child(albedo_picker)
-			hbox.add_child(normal_picker)
-			
-			texture_layers_control.add_child(hbox)
-			
-		if has_texture_layers:
-			albedo_picker = texture_layers_control.get_child(i).get_child(1)
-			normal_picker = texture_layers_control.get_child(i).get_child(2)
+		show_next_empty = normal != null
 		
-		albedo_picker.set_edited_resource(albedo_arr[i])
-		normal_picker.set_edited_resource(normal_arr[i])
+		layer.set_layer_data(albedo, normal)
+		layer.set_selected(i == texture_layer - 1)
+		
+		layer.connect("selected", _on_texture_selected)
+		layer.connect("changed", callback)
+		
+		texture_layers_list.add_child(layer)
+		
+	texture_layer_error.set_visible(!show_next_empty)
+		
+	if layer_count < 16 and show_next_empty or layer_count == 0:
+		var empty_layer: TextureLayerContainer = TextureLayerContainer.new(layer_count)
+		empty_layer.connect("selected", _on_texture_selected)
+		empty_layer.connect("changed", callback)
+		texture_layers_list.add_child(empty_layer)
+		
+func load_meshes(data: Array, callback: Callable):
+	clear_mesh_layers()
+	
+	var layer_count: int = data[0].size()
+	var show_next_empty: bool = false
+	
+	for i in layer_count:
+		var layer: MeshLayerContainer = MeshLayerContainer.new(i)
+		var mesh: Mesh = data[0][i]
+		
+		show_next_empty = mesh != null
+		
+		layer.set_layer_data(mesh, data[1][i])
+		layer.connect("changed", callback)
+		
+		mesh_layers_list.add_child(layer)
+		
+	if show_next_empty or layer_count == 0:
+		var empty_layer: MeshLayerContainer = MeshLayerContainer.new(layer_count)
+		empty_layer.connect("changed", callback)
+		mesh_layers_list.add_child(empty_layer)
+		
+class TextureLayerContainer extends HBoxContainer:
+	
+	signal selected(id: int)
+	signal changed(texture: Texture2D, id: int, is_albedo: bool)
+	
+	var is_selected: bool = false
+	
+	var main_button: Button
+	var albedo_picker: EditorResourcePicker
+	var normal_picker: EditorResourcePicker
+	
+	var id: int
+	
+	func _init(layer: int):
+		id = layer
+		albedo_picker = EditorResourcePicker.new()
+		albedo_picker.set_base_type("Texture2D")
+		albedo_picker.connect("resource_changed", _on_changed.bind(true))
+		albedo_picker.set_toggle_mode(true)
+		main_button = albedo_picker.get_child(0)
+		
+		main_button.connect("toggled", _on_selected)
+		
+		normal_picker = EditorResourcePicker.new()
+		normal_picker.set_base_type("Texture2D")
+		normal_picker.connect("resource_changed", _on_changed.bind(false))
+	
+		albedo_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		normal_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		
+		add_child(albedo_picker)
+		add_child(normal_picker)
+		
+	func _on_changed(texture: Variant, is_albedo: bool):
+		# If texture is cleared, Object#null is passed
+		# which causes an error "Can't convert Object to Object. 4.0 beta 10
+		if texture == null:
+			texture = null
+		emit_signal("changed", texture, id, is_albedo)
+		
+	func _on_selected(toggle: bool):
+		emit_signal("selected", id)
+		set_selected(toggle)
+		
+	func set_layer_data(albedo: Texture2D, normal: Texture2D):
+		albedo_picker.set_edited_resource(albedo)
+		normal_picker.set_edited_resource(normal)
+	
+	func set_selected(select: bool):
+		is_selected = select
+		main_button.set_pressed_no_signal(select)
+	
+class MeshLayerContainer extends HBoxContainer:
+	
+	signal changed(mesh: Mesh, layer: int, id: int)
+	
+	var mesh_picker: EditorResourcePicker
+	var layer_spinbox: SpinBox
+	
+	var id: int
+	
+	func _init(layer: int):
+		id = layer
+		mesh_picker = EditorResourcePicker.new()
+		mesh_picker.set_base_type("Mesh")
+		mesh_picker.connect("resource_changed", _on_mesh_changed)
+		
+		layer_spinbox = SpinBox.new()
+		layer_spinbox.set_prefix("Layer")
+		layer_spinbox.set_min(1)
+		layer_spinbox.set_max(16)
+		layer_spinbox.connect("value_changed", _on_layer_changed)
+	
+		layer_spinbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		mesh_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		
+		add_child(layer_spinbox)
+		add_child(mesh_picker)
+	
+	func _on_mesh_changed(mesh: Variant):
+		if mesh == null:
+			mesh = null
+		emit_signal("changed", mesh, layer_spinbox.get_value(), id)
+		
+	func _on_layer_changed(layer: int):
+		emit_signal("changed", mesh_picker.get_edited_resource(), layer, id)
+		layer_spinbox.apply()
+	
+	func set_layer_data(mesh: Mesh, layer: int):
+		layer_spinbox.set_value_no_signal(layer)
+		mesh_picker.set_edited_resource(mesh)
+		

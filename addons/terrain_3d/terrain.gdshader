@@ -32,7 +32,7 @@ vec4 pack_normal(vec3 n, float a) {
 }
 
 vec3 get_terrain_normal(vec2 uv){
-	mat3 normal_basis = mat3(vec3(1,0,0),vec3(0,(1.0),0),vec3(0,0,1));
+	mat3 normal_basis = mat3(vec3(1,0,0),vec3(0,1,0),vec3(0,0,1));
 	return normal_basis * unpack_normal(texture(terrain_normalmap, uv));
 }
 
@@ -44,7 +44,7 @@ void vertex(){
 	
 	UV = world_vertex.xz * 0.5;
 	
-	float height = texture(terrain_heightmap, UV2).r;
+	float height = (texture(terrain_heightmap, UV2).r);
 	VERTEX.y = (height * terrain_height) * (VERTEX.y + 1.0);
 
 	NORMAL = get_terrain_normal(UV2);

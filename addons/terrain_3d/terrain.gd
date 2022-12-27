@@ -1,14 +1,12 @@
-
 @tool
 class_name Terrain
-extends StaticBody3D
+extends Node3D
 
-const SHADER: Shader = preload("res://addons/terrain_3d/terrain.gdshader")
+const SURFACE_SHADER: Shader = preload("res://addons/terrain_3d/terrain.gdshader")
 const DEFAULT_GRID_TEXTURE: Texture2D = preload("res://addons/terrain_3d/temp/grid_albedo.png")
+const PARTICLE_SHADER: Shader = preload("res://addons/terrain_3d/particle.gdshader")
 
 const MIN_TRAVEL_DISTANCE: float = 8.0
-
-
 
 @export_enum("512:512", "1024:1024", "2048:2048", "4096:4096", "8192:8192") var size: int = 1024 :
 	set = set_size
@@ -28,16 +26,28 @@ const MIN_TRAVEL_DISTANCE: float = 8.0
 @export var lod_disable: bool = false :
 	set = set_disabled
 	
-@export_group("Material", "shader_")
+@export_group("Particles", "particle_")
 
-var shader_material: ShaderMaterial
-var shader_texture_arrays: Array[Array]
+@export var particle_draw_distance: int = 128 :
+	set = set_particle_draw_distance
+	
+@export var particle_density: int = 4 :
+	set = set_particle_density
 
+var particle_process_material: ShaderMaterial # Unused for now because particle shader don't support per instance uniforms
+var particle_mesh_array: Array[Array]
+var particle_mask_texture: Texture2D
 
+@export_group("Surface", "surface_")
+
+var surface_material: ShaderMaterial
+var surface_texture_array: Array[Array]
+
+var particle_emitters: Array[GPUParticles3D]
 var lod_meshes: Array
 var chunks: Array
 var camera: Camera3D
-var collision_shape: CollisionShape3D
+var collision: StaticBody3D
 var previous_camera_position: Vector3
 
 func _init():
@@ -53,7 +63,9 @@ func _exit_tree():
 func _process(delta):
 	
 	if !camera:
-		camera = TerrainUtil.get_camera()
+		if Engine.is_editor_hint():
+			camera = TerrainUtil.get_camera()
+		camera = get_viewport().get_camera_3d()
 	else:
 		var camera_position = camera.global_transform.origin * Vector3(1,0,1)
 		var distance_traveled: float = previous_camera_position.distance_to(camera_position)
@@ -71,21 +83,24 @@ func _process(delta):
 				if new_lod_level != old_lod_level:
 					chunk.set_current_lod_level(new_lod_level)
 					chunk.mesh = lod_meshes[new_lod_level]
+					
+		for emitter in particle_emitters:
+			emitter.global_transform.origin = camera_position
 				
 func set_size(value: int):
 	if value != size:
 		size = value
 		call_deferred("update")
 		
-		if shader_material:
-			shader_material.set_shader_parameter("terrain_size", float(value))
+		if surface_material:
+			surface_material.set_shader_parameter("terrain_size", float(value))
 		
 func set_height(value: int):
 	if value != height:
 		height = value
 		
-		if shader_material:
-			shader_material.set_shader_parameter("terrain_height", float(value))
+		if surface_material:
+			surface_material.set_shader_parameter("terrain_height", float(value))
 			update_normalmap(true)
 			
 		update_aabb()
@@ -104,63 +119,105 @@ func set_disabled(value: bool):
 	set_process(!value)
 	lod_disable = value
 	
-func set_texture(texture: Texture2D, index: int, is_albedo: bool):
-	validate_texture_arrays()
+func set_surface_texture(texture: Texture2D, index: int, is_albedo: bool):
+#	var arr: TerrainTextureArray = surface_material.get_shader_parameter("texture_albedos")
+#	if !is_albedo:
+#		arr = surface_material.get_shader_parameter("texture_normals")
+#	arr.set_texture(texture, index)
 	
-	var tex_arr: int = 0
+	if is_albedo:
+		if index < surface_texture_array[0].size():
+			if texture == null:
+				surface_texture_array[0].remove_at(index)
+			else:
+				surface_texture_array[0][index] = texture
+		else:
+			surface_texture_array[0].append(texture)
+			
+	surface_texture_array[1].resize(surface_texture_array[0].size())
+		
 	if !is_albedo:
-		tex_arr = 1
+		surface_texture_array[1][index] = texture
 	
-	shader_texture_arrays[tex_arr][index] = texture
 	update_textures()
 	
-func get_texture_arrays():
-	validate_texture_arrays()
-	return shader_texture_arrays
+func set_particle_draw_distance(value: int):
+	particle_draw_distance = value
+	update_particles()
 	
-func get_shader():
-	return shader_material
+func set_particle_density(value: int):
+	particle_density = max(value, 1)
+	update_particles()
+	
+func set_particle_mesh(mesh: Mesh, layer: int, index: int):
+	if index < particle_mesh_array[0].size():
+		if mesh == null:
+			particle_mesh_array[0].remove_at(index)
+			particle_mesh_array[1].remove_at(index)
+		else:
+			particle_mesh_array[0][index] = mesh
+			particle_mesh_array[1][index] = layer
+	else:
+		particle_mesh_array[0].append(mesh)
+		particle_mesh_array[1].append(layer)
+	
+	update_particles()
+	
+func get_surface_textures():
+#	if surface_material:
+#		var albedo_array: TerrainTextureArray = surface_material.get_shader_parameter("texture_albedos")
+#		var normal_array: TerrainTextureArray = surface_material.get_shader_parameter("texture_normals")
+#		return [albedo_array.get_array(), normal_array.get_array()]
+#	return []
+	return surface_texture_array
+	
+func get_particle_meshes():
+	return particle_mesh_array
+	
+func get_surface_material():
+	return surface_material
 	
 func update_shader(force_reset: bool = false):
 	
-	if !shader_material:
-		shader_material = ShaderMaterial.new()
-		shader_material.set_shader(SHADER)
+	if !surface_material:
+		surface_material = ShaderMaterial.new()
+		surface_material.set_shader(SURFACE_SHADER)
 	
-	if shader_material:
+	if surface_material:
 		update_heightmap(force_reset)
 		update_normalmap(force_reset)
 		update_splatmaps(force_reset)
-		update_textures()
 		
 	for mesh in lod_meshes:
-		mesh.surface_set_material(0, shader_material)
+		mesh.surface_set_material(0, surface_material)
 		
 func update_heightmap(force: bool = false):
-	shader_material.set_shader_parameter("terrain_height", height)
-	var heightmap: ImageTexture = shader_material.get_shader_parameter("terrain_heightmap")
+	surface_material.set_shader_parameter("terrain_height", height)
+	var heightmap: ImageTexture = surface_material.get_shader_parameter("terrain_heightmap")
 	if !heightmap or force:
 		heightmap = ImageTexture.new()
 		var img: Image = Image.create(1025, 1025, false, Image.FORMAT_RH)
 		heightmap.set_image(img)
-		shader_material.set_shader_parameter("terrain_heightmap", heightmap)
+		surface_material.set_shader_parameter("terrain_heightmap", heightmap)
 		
 func update_normalmap(force: bool = false):
-	var normalmap: ImageTexture = shader_material.get_shader_parameter("terrain_normalmap")
+	var normalmap: ImageTexture = surface_material.get_shader_parameter("terrain_normalmap")
 	if !normalmap or force:
-		var heightmap: ImageTexture = shader_material.get_shader_parameter("terrain_heightmap")
+		var heightmap: ImageTexture = surface_material.get_shader_parameter("terrain_heightmap")
 		var img: Image = heightmap.get_image().duplicate()
 		img.bump_map_to_normal_map(height)
 		img.shrink_x2()
 		img.generate_mipmaps()
-		normalmap = ImageTexture.create_from_image(img)
-		shader_material.set_shader_parameter("terrain_normalmap", normalmap)
+		if !normalmap:
+			normalmap = ImageTexture.new()
+		normalmap.set_image(img)
+		surface_material.set_shader_parameter("terrain_normalmap", normalmap)
 		
 func update_splatmaps(force: bool = false):
 	var splatmaps: PackedStringArray = ["terrain_splatmap_01","terrain_splatmap_02","terrain_splatmap_03","terrain_splatmap_04"]
 	var is_first: bool = true
 	for texture in splatmaps:
-		var splatmap: ImageTexture = shader_material.get_shader_parameter(texture)
+		var splatmap: ImageTexture = surface_material.get_shader_parameter(texture)
 		if !splatmap or force:
 			splatmap = ImageTexture.new()
 			var img: Image = Image.create(1024, 1024, true, Image.FORMAT_RGBA8)
@@ -168,68 +225,106 @@ func update_splatmaps(force: bool = false):
 				img.fill(Color(1,0,0,0))
 				is_first = false
 			splatmap.set_image(img)
-			shader_material.set_shader_parameter(texture, splatmap)
+			surface_material.set_shader_parameter(texture, splatmap)
 
 func update_textures():
-	var albedo_array: Texture2DArray = shader_material.get_shader_parameter("texture_albedos")
-	var normal_array: Texture2DArray = shader_material.get_shader_parameter("texture_normals")
+	var albedo_array: Texture2DArray = surface_material.get_shader_parameter("texture_albedos")
+	var normal_array: Texture2DArray = surface_material.get_shader_parameter("texture_normals")
 	
-	validate_texture_arrays()
+	if surface_texture_array.is_empty():
+		# Resizing to 2 and filling with Array does not create 2 unique Arrays????
+		surface_texture_array.append(Array())
+		surface_texture_array.append(Array())
 	
-	albedo_array = convert_to_texture_array(shader_texture_arrays[0])
-	shader_material.set_shader_parameter("texture_albedos", albedo_array)
-	
-	normal_array = convert_to_texture_array(shader_texture_arrays[1])
-	shader_material.set_shader_parameter("texture_normals", normal_array)
+	albedo_array = TerrainTextureArray.convert_array(surface_texture_array[0])
+	surface_material.set_shader_parameter("texture_albedos", albedo_array)
+
+	normal_array = TerrainTextureArray.convert_array(surface_texture_array[1])
+	surface_material.set_shader_parameter("texture_normals", normal_array)
 
 	var use_grid_texture: bool = albedo_array.get_layers() == 0
 	if use_grid_texture:
-		shader_material.set_shader_parameter("terrain_grid", DEFAULT_GRID_TEXTURE)
-	shader_material.set_shader_parameter("use_grid", use_grid_texture)
-	
-func convert_to_texture_array(arr: Array):
-	var img_arr: Array[Image]
-	for tex in arr:
-		if tex != null:
-			var img: Image = tex.get_image()
-			if img.is_compressed():
-				img.decompress()
-			
-			img.generate_mipmaps()
-			img.convert(Image.FORMAT_RGBA8)
-			img_arr.push_front(img)
-			
-	var tex_arr: Texture2DArray = Texture2DArray.new()
-	
-	if !img_arr.is_empty():
-		img_arr.reverse()
-		tex_arr.create_from_images(img_arr)
-	return tex_arr
-	
-func validate_texture_arrays():
-	if shader_texture_arrays.size() != 2:
-		shader_texture_arrays.clear()
-		var a = Array()
-		a.resize(16)
-		shader_texture_arrays.append(a)
-		var n = Array()
-		n.resize(16)
-		shader_texture_arrays.append(n)
-	
-func update_multimeshes():
-	# create a multimesh for each splat
-	pass
+		surface_material.set_shader_parameter("terrain_grid", DEFAULT_GRID_TEXTURE)
+	surface_material.set_shader_parameter("use_grid", use_grid_texture)
 
+func update_particles():
+	
+	if particle_mesh_array.is_empty():
+		particle_mesh_array.append(Array())
+		particle_mesh_array.append(Array())
+	
+	if particle_mesh_array[0].size() < particle_emitters.size():
+		var count: int = particle_emitters.size() - particle_mesh_array[0].size()
+		for i in count:
+			var node: GPUParticles3D = particle_emitters.pop_back()
+			node.queue_free()
+	else:
+		var count: int = particle_mesh_array[0].size() - particle_emitters.size()
+		for i in count:
+			var node: GPUParticles3D = GPUParticles3D.new()
+			node.set_explosiveness_ratio(1.0)
+			node.set_draw_order(GPUParticles3D.DRAW_ORDER_VIEW_DEPTH)
+			particle_emitters.append(node)
+			
+	if particle_emitters.size() == particle_mesh_array[0].size():
+	
+		var sqr_radius: float = float(particle_draw_distance) * sqrt(PI)
+		var instance_area: int = int((sqr_radius * sqr_radius) / 2.0)
+		
+		# Why does it need to divided twice by the density? only way I got it to keep the area the same
+		var instance_count: int = instance_area / particle_density / particle_density
+		
+		var splat_channels: Array[Color] = [
+			Color(1,0,0,0),
+			Color(0,1,0,0),
+			Color(0,0,1,0),
+			Color(0,0,0,1),
+		]
+		
+		var index: int = 0
+		for emitter in particle_emitters:
+			if !emitter.is_inside_tree():
+				add_child(emitter)
+			if is_instance_valid(emitter):
+				var layer: int = particle_mesh_array[1][index]
+				var mesh: Mesh = particle_mesh_array[0][index]
+				emitter.set_draw_pass_mesh(0, mesh)
+#				emitter.set_lifetime(60.0)
+				emitter.set_amount(instance_count)
+				var aabb: AABB
+				aabb.size = Vector3(instance_area, height, instance_area)
+				aabb.position = -(aabb.size / 2.0)
+				emitter.set_visibility_aabb(aabb)
+				var material: ShaderMaterial = emitter.get_process_material()
+				if !material:
+					material = ShaderMaterial.new()
+					material.set_shader(PARTICLE_SHADER)
+					material.set_shader_parameter("terrain_heightmap", surface_material.get_shader_parameter("terrain_heightmap"))
+					material.set_shader_parameter("terrain_normalmap", surface_material.get_shader_parameter("terrain_normalmap"))
+					emitter.set_process_material(material)
+				material.set_shader_parameter("terrain_height", height)
+				material.set_shader_parameter("terrain_size", size)
+				material.set_shader_parameter("seed", index)
+				material.set_shader_parameter("instance_count", instance_count)
+				material.set_shader_parameter("instance_density", particle_density)
+				var splatmap_parameter: String = "terrain_splatmap_0" + str(((layer - 1) / 4)+1)
+				material.set_shader_parameter("terrain_splatmap", surface_material.get_shader_parameter(splatmap_parameter))
+				var splat_channel: Color = splat_channels[wrapi(layer, 1, 5) - 1]
+				material.set_shader_parameter("terrain_splatmap_channel", splat_channel)
+				
+			index += 1
+		
 func update():
 
 	clear()
-	update_lod_meshes()
+	update_lod()
 	
 	if lod_meshes.is_empty():
 		return
 		
 	update_shader()
-	update_multimeshes()
+	update_textures()
+	update_particles()
 	update_collision()
 
 	var chunk_size = size / partition
@@ -262,18 +357,37 @@ func update_aabb():
 		
 func update_collision():
 	
+	if !collision:
+		collision = StaticBody3D.new()
+		add_child(collision)
+	
+	var collision_shape: CollisionShape3D
+	if collision.get_child_count() > 0:
+		collision_shape = collision.get_child(0)
+	
 	if !collision_shape:
 		collision_shape = CollisionShape3D.new()
-		
-		add_child(collision_shape)
-		
+		collision.add_child(collision_shape)
 		var shape: HeightMapShape3D = HeightMapShape3D.new()
 		collision_shape.set_shape(shape)
 	
-	collision_shape.shape.map_width = size + 1
-	collision_shape.shape.map_depth = size + 1
+	var shape_size: int = size + 1
+	collision_shape.shape.map_width = shape_size
+	collision_shape.shape.map_depth = shape_size
 	
-func update_lod_meshes():
+	var hmap: Image = get_surface_material().get_shader_parameter("terrain_heightmap").get_image()
+	
+	var map_data: PackedFloat32Array = PackedFloat32Array()
+	
+	for y in shape_size:
+		for x in shape_size:
+			var uv: Vector2 = Vector2(x,y) / float(shape_size)
+			var h: float = hmap.get_pixelv(Vector2(hmap.get_size()) * uv).r * height
+			map_data.push_back(h)
+	
+	collision_shape.shape.set_map_data(map_data)
+	
+func update_lod():
 	
 	var chunk_size = size / partition
 		
@@ -288,7 +402,7 @@ func update_lod_meshes():
 	for i in lod_count:
 		
 		var mesh = GridMesh.new(subdivision, chunk_size)
-		mesh.surface_set_material(0, shader_material)
+		mesh.surface_set_material(0, surface_material)
 		lod_meshes[i] = mesh
 		
 		previous_subdivision *= 2
@@ -303,15 +417,25 @@ func _notification(what):
 func _get_property_list():
 	var property_list: Array = [
 		{
-			"name": "shader_material",
+			"name": "surface_material",
 			"type": TYPE_OBJECT,
 			"usage": PROPERTY_USAGE_READ_ONLY | PROPERTY_USAGE_DEFAULT,
 		},
 		{
-			"name": "shader_texture_arrays",
+			"name": "surface_texture_array",
 			"type": TYPE_ARRAY,
-			"usage": PROPERTY_USAGE_READ_ONLY | PROPERTY_USAGE_DEFAULT,
-		}
+			"usage": PROPERTY_USAGE_STORAGE,
+		},
+		{
+			"name": "particle_mesh_array",
+			"type": TYPE_ARRAY,
+			"usage": PROPERTY_USAGE_STORAGE,
+		},
+		{
+			"name": "particle_mask_texture",
+			"type": TYPE_OBJECT,
+			"usage": PROPERTY_USAGE_STORAGE,
+		},
 	]
 	return property_list
 
@@ -486,40 +610,6 @@ class GridMesh extends ArrayMesh:
 		tris[i+2] = tris[i+3]
 		tris[i+5] = v11
 		return i + 6
-		
-class TerrainTextureArray extends Texture2DArray:
-	
-	const MAX_TEXTURE_SLOTS: int = 16
-
-	@export var texture_array: Array[Texture2D]
-	
-	func _init():
-		texture_array.resize(MAX_TEXTURE_SLOTS)
-		texture_array.fill(null)
-		
-	func set_texture(texture: Texture2D, index: int):
-		texture_array[index] = texture
-		update()
-		emit_changed()
-		
-	func update():
-		
-		var img_arr: Array[Image]
-		for tex in texture_array:
-			if tex != null:
-				var img: Image = tex.get_image()
-				
-				if img.is_compressed():
-					img.decompress()
-				
-				img.convert(Image.FORMAT_RGBA8)
-					
-				img_arr.push_front(img)
-		
-		if !img_arr.is_empty():
-			create_from_images(img_arr)
-			
-		notify_property_list_changed()
 
 class TerrainUtil extends Object:
 	

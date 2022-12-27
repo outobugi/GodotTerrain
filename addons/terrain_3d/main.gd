@@ -20,7 +20,7 @@ func _enter_tree():
 	if !toolbar:
 		toolbar = FILE_TOOLBAR.instantiate()
 	toolbar.hide()
-	toolbar.connect("texture_changed", on_texture_changed)
+	toolbar.call_deferred("init_tools")
 	add_control_to_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_SIDE_RIGHT, toolbar)
 
 func _exit_tree():
@@ -56,11 +56,14 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent):
 				var space = current_terrain.get_world_3d().get_space()
 				var ray_data: Dictionary = PhysicsServer3D.space_get_direct_state(space).intersect_ray(ray_param)
 				
+				var was_pressed: bool = mouse_is_pressed
+				
 				if event is InputEventMouseButton and event.get_button_index() == 1:
 #					if mouse_is_pressed and !event.is_pressed():
 #						current_terrain.update_normalmap(true)
+					
 					mouse_is_pressed = event.is_pressed()
-						
+					
 				if event is InputEventMouseMotion and mouse_is_pressed:
 					
 					if !ray_data.is_empty():
@@ -69,8 +72,11 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent):
 						
 						if toolbar.tool_mode == toolbar.ToolMode.HEIGHT:
 							paint_height(uv)
-						if toolbar.tool_mode == toolbar.ToolMode.SPLAT:
+						if toolbar.tool_mode == toolbar.ToolMode.TEXTURE:
 							paint_splat(uv)
+							
+				if was_pressed and !mouse_is_pressed:
+					current_terrain.update_collision()
 							
 				if mouse_is_pressed:
 					return EditorPlugin.AFTER_GUI_INPUT_STOP
@@ -81,7 +87,8 @@ func is_terrain_valid():
 func set_edited_terrain(terrain: Terrain):
 	current_terrain = terrain
 	if current_terrain:
-		load_texture_arrays()
+		call_deferred("load_textures")
+		call_deferred("load_meshes")
 
 func get_uv_from(pos: Vector3):
 	return (Vector2(pos.x, pos.z) / float(current_terrain.size)) + Vector2(0.5, 0.5)
@@ -95,16 +102,24 @@ func is_in_bounds(pixel_position: Vector2i, max_position: Vector2i):
 	var less_than_max: bool =  pixel_position.x < max_position.x and pixel_position.y < max_position.y
 	return more_than_min and less_than_max
 	
-func load_texture_arrays():
-	var arrays: Array = current_terrain.get_texture_arrays()
-	toolbar.load_textures(arrays[0], arrays[1])
-
-func on_texture_changed(texture: Texture2D, index: int, is_albedo: bool = true):
-	if is_terrain_valid():
-		current_terrain.set_texture(texture, index, is_albedo)
+func load_textures():
+	toolbar.load_textures(current_terrain.get_surface_textures(), on_surface_texture_changed)
 	
+func load_meshes():
+	toolbar.load_meshes(current_terrain.get_particle_meshes(), on_particle_mesh_changed)
+
+func on_surface_texture_changed(texture: Texture2D, index: int, is_albedo: bool = true):
+	if is_terrain_valid():
+		current_terrain.set_surface_texture(texture, index, is_albedo)
+		call_deferred("load_textures")
+		
+func on_particle_mesh_changed(mesh: Mesh, layer: int, index: int):
+	if is_terrain_valid():
+		current_terrain.set_particle_mesh(mesh, layer, index)
+		call_deferred("load_meshes")
+		
 func paint_height(uv: Vector2):
-	var heightmap: ImageTexture = current_terrain.get_shader().get_shader_parameter("terrain_heightmap")
+	var heightmap: ImageTexture = current_terrain.get_surface_material().get_shader_parameter("terrain_heightmap")
 	var heightmap_img: Image = heightmap.get_image()
 	var heightmap_size: Vector2i = heightmap_img.get_size()
 	
@@ -141,10 +156,10 @@ func paint_height(uv: Vector2):
 func paint_splat(uv: Vector2):
 	
 	var splatmaps: Array[ImageTexture] = [
-		current_terrain.get_shader().get_shader_parameter("terrain_splatmap_01"),
-		current_terrain.get_shader().get_shader_parameter("terrain_splatmap_02"),
-		current_terrain.get_shader().get_shader_parameter("terrain_splatmap_03"),
-		current_terrain.get_shader().get_shader_parameter("terrain_splatmap_04")
+		current_terrain.get_surface_material().get_shader_parameter("terrain_splatmap_01"),
+		current_terrain.get_surface_material().get_shader_parameter("terrain_splatmap_02"),
+		current_terrain.get_surface_material().get_shader_parameter("terrain_splatmap_03"),
+		current_terrain.get_surface_material().get_shader_parameter("terrain_splatmap_04")
 	]
 	
 	var brush_size = toolbar.get_brush_size()
@@ -153,7 +168,7 @@ func paint_splat(uv: Vector2):
 	var brush_shape_size = brush_shape.get_size()
 	
 	var brush_color = color_channels[wrapi(toolbar.get_texture_layer(), 1, 5) - 1]
-	var splat_index = ((toolbar.get_texture_layer() - 1) / 4)
+	var splat_index = (toolbar.get_texture_layer() - 1) / 4
 	
 	var rand_rotation = PI * randf()
 

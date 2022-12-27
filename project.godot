@@ -9,19 +9,25 @@
 config_version=5
 
 _global_script_classes=[{
-"base": "StaticBody3D",
+"base": "Node3D",
 "class": &"Terrain",
 "language": &"GDScript",
 "path": "res://addons/terrain_3d/terrain.gd"
+}, {
+"base": "Texture2DArray",
+"class": &"TerrainTextureArray",
+"language": &"GDScript",
+"path": "res://addons/terrain_3d/terrain_texture_array.gd"
 }]
 _global_script_class_icons={
-"Terrain": ""
+"Terrain": "",
+"TerrainTextureArray": ""
 }
 
 [application]
 
 config/name="Terrain3D"
-run/main_scene="res://addons/terrain_3d/ui/tools.tscn"
+run/main_scene="res://test/node_3d.tscn"
 config/features=PackedStringArray("4.0", "Forward Plus")
 config/icon="res://icon.svg"
 
