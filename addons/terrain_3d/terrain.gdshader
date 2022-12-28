@@ -16,7 +16,7 @@ uniform sampler2D terrain_splatmap_04 : filter_linear_mipmap, repeat_disable;
 uniform sampler2DArray texture_albedos : source_color, filter_linear_mipmap_anisotropic;
 uniform sampler2DArray texture_normals : filter_linear_mipmap_anisotropic, hint_normal;
 
-uniform bool use_grid = false;
+uniform bool use_grid = true;
 uniform sampler2D terrain_grid : source_color, filter_linear_mipmap_anisotropic;
 
 vec3 unpack_normal(vec4 rgba) {

@@ -14,20 +14,25 @@ _global_script_classes=[{
 "language": &"GDScript",
 "path": "res://addons/terrain_3d/terrain.gd"
 }, {
+"base": "Material",
+"class": &"TerrainMaterial",
+"language": &"GDScript",
+"path": "res://addons/terrain_3d/terrain_material.gd"
+}, {
 "base": "Texture2DArray",
 "class": &"TerrainTextureArray",
 "language": &"GDScript",
 "path": "res://addons/terrain_3d/terrain_texture_array.gd"
 }]
 _global_script_class_icons={
-"Terrain": "",
+"Terrain": "res://addons/terrain_3d/icons/icon_terrain.svg",
+"TerrainMaterial": "res://addons/terrain_3d/icons/icon_terrain_material.svg",
 "TerrainTextureArray": ""
 }
 
 [application]
 
 config/name="Terrain3D"
-run/main_scene="res://test/node_3d.tscn"
 config/features=PackedStringArray("4.0", "Forward Plus")
 config/icon="res://icon.svg"
 

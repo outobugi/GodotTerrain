@@ -40,7 +40,6 @@ func _make_visible(visible: bool):
 	is_active = visible
 	toolbar.visible = visible
 	
-	
 func _forward_3d_gui_input(camera: Camera3D, event: InputEvent):
 	
 	if is_active:
@@ -59,9 +58,6 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent):
 				var was_pressed: bool = mouse_is_pressed
 				
 				if event is InputEventMouseButton and event.get_button_index() == 1:
-#					if mouse_is_pressed and !event.is_pressed():
-#						current_terrain.update_normalmap(true)
-					
 					mouse_is_pressed = event.is_pressed()
 					
 				if event is InputEventMouseMotion and mouse_is_pressed:
@@ -103,14 +99,18 @@ func is_in_bounds(pixel_position: Vector2i, max_position: Vector2i):
 	return more_than_min and less_than_max
 	
 func load_textures():
-	toolbar.load_textures(current_terrain.get_surface_textures(), on_surface_texture_changed)
+	var textures: Array = []
+	if current_terrain.has_material():
+		textures = current_terrain.get_material().get_textures()
+	toolbar.load_textures(textures, on_surface_texture_changed)
 	
 func load_meshes():
 	toolbar.load_meshes(current_terrain.get_particle_meshes(), on_particle_mesh_changed)
 
 func on_surface_texture_changed(texture: Texture2D, index: int, is_albedo: bool = true):
 	if is_terrain_valid():
-		current_terrain.set_surface_texture(texture, index, is_albedo)
+		if current_terrain.has_material():
+			current_terrain.get_material().set_texture(texture, index, is_albedo)
 		call_deferred("load_textures")
 		
 func on_particle_mesh_changed(mesh: Mesh, layer: int, index: int):
@@ -119,7 +119,7 @@ func on_particle_mesh_changed(mesh: Mesh, layer: int, index: int):
 		call_deferred("load_meshes")
 		
 func paint_height(uv: Vector2):
-	var heightmap: ImageTexture = current_terrain.get_surface_material().get_shader_parameter("terrain_heightmap")
+	var heightmap: ImageTexture = current_terrain.get_material().get_heightmap()
 	var heightmap_img: Image = heightmap.get_image()
 	var heightmap_size: Vector2i = heightmap_img.get_size()
 	
@@ -151,16 +151,9 @@ func paint_height(uv: Vector2):
 				heightmap_img.set_pixelv(pixel_position, color)
 	
 	heightmap.set_image(heightmap_img)
-	current_terrain.update_normalmap(true)
+	current_terrain.get_material().update_normalmap(true)
 
 func paint_splat(uv: Vector2):
-	
-	var splatmaps: Array[ImageTexture] = [
-		current_terrain.get_surface_material().get_shader_parameter("terrain_splatmap_01"),
-		current_terrain.get_surface_material().get_shader_parameter("terrain_splatmap_02"),
-		current_terrain.get_surface_material().get_shader_parameter("terrain_splatmap_03"),
-		current_terrain.get_surface_material().get_shader_parameter("terrain_splatmap_04")
-	]
 	
 	var brush_size = toolbar.get_brush_size()
 	var brush_opacity = toolbar.get_brush_opacity()
@@ -172,9 +165,9 @@ func paint_splat(uv: Vector2):
 	
 	var rand_rotation = PI * randf()
 
-	for i in splatmaps.size():
+	for i in TerrainMaterial.MAX_SPLATMAP:
 		
-		var splatmap_img: Image = splatmaps[i].get_image()
+		var splatmap_img: Image = current_terrain.get_material().get_splatmap(i).get_image()
 		var splatmap_size: Vector2i = splatmap_img.get_size()
 		
 		var new_color = Color(0,0,0,0)
@@ -199,5 +192,5 @@ func paint_splat(uv: Vector2):
 					
 					splatmap_img.set_pixelv(pixel_position, color)
 		
-		splatmaps[i].set_image(splatmap_img)
+		current_terrain.get_material().get_splatmap(i).set_image(splatmap_img)
 	

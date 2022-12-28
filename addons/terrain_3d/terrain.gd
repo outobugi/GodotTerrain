@@ -1,19 +1,20 @@
 @tool
 class_name Terrain
 extends Node3D
+@icon("res://addons/terrain_3d/icons/icon_terrain.svg")
 
-const SURFACE_SHADER: Shader = preload("res://addons/terrain_3d/terrain.gdshader")
-const DEFAULT_GRID_TEXTURE: Texture2D = preload("res://addons/terrain_3d/temp/grid_albedo.png")
-const PARTICLE_SHADER: Shader = preload("res://addons/terrain_3d/particle.gdshader")
+const _SURFACE_SHADER: Shader = preload("res://addons/terrain_3d/terrain.gdshader")
+const _DEFAULT_GRID_TEXTURE: Texture2D = preload("res://addons/terrain_3d/temp/grid_albedo.png")
+const _PARTICLE_SHADER: Shader = preload("res://addons/terrain_3d/particle.gdshader")
 
+const _EDITOR_COLLISION_SIZE: int = 256
 const MIN_TRAVEL_DISTANCE: float = 8.0
 
 @export_enum("512:512", "1024:1024", "2048:2048", "4096:4096", "8192:8192") var size: int = 1024 :
 	set = set_size
 @export var height: int = 64 :
 	set = set_height
-# Partition is the count of chunks on each side.
-@export var partition: int = 8 :
+@export var partition: int = 8 : # Partition is the count of chunks on each side.
 	set = set_partition
 
 @export_group("LOD", "lod_")
@@ -26,7 +27,12 @@ const MIN_TRAVEL_DISTANCE: float = 8.0
 @export var lod_disable: bool = false :
 	set = set_disabled
 	
-@export_group("Particles", "particle_")
+@export_group("Surface", "surface_")
+
+@export var surface_material: TerrainMaterial :
+	set = set_material
+
+@export_subgroup("Particles", "particle_")
 
 @export var particle_draw_distance: int = 128 :
 	set = set_particle_draw_distance
@@ -38,16 +44,16 @@ var particle_process_material: ShaderMaterial # Unused for now because particle 
 var particle_mesh_array: Array[Array]
 var particle_mask_texture: Texture2D
 
-@export_group("Surface", "surface_")
+@export_group("Collision", "collision_")
 
-var surface_material: ShaderMaterial
-var surface_texture_array: Array[Array]
+@export_flags_3d_physics var collision_layer: int = 0
+@export_flags_3d_physics var collision_mask: int = 0
 
 var particle_emitters: Array[GPUParticles3D]
 var lod_meshes: Array
 var chunks: Array
 var camera: Camera3D
-var collision: StaticBody3D
+var physics_body: StaticBody3D
 var previous_camera_position: Vector3
 
 func _init():
@@ -92,18 +98,10 @@ func set_size(value: int):
 		size = value
 		call_deferred("update")
 		
-		if surface_material:
-			surface_material.set_shader_parameter("terrain_size", float(value))
-		
 func set_height(value: int):
 	if value != height:
 		height = value
-		
-		if surface_material:
-			surface_material.set_shader_parameter("terrain_height", float(value))
-			update_normalmap(true)
-			
-		update_aabb()
+		call_deferred("update")
 		
 func set_partition(value: int):
 	if value != partition:
@@ -118,28 +116,6 @@ func set_lod_count(value: int):
 func set_disabled(value: bool):
 	set_process(!value)
 	lod_disable = value
-	
-func set_surface_texture(texture: Texture2D, index: int, is_albedo: bool):
-#	var arr: TerrainTextureArray = surface_material.get_shader_parameter("texture_albedos")
-#	if !is_albedo:
-#		arr = surface_material.get_shader_parameter("texture_normals")
-#	arr.set_texture(texture, index)
-	
-	if is_albedo:
-		if index < surface_texture_array[0].size():
-			if texture == null:
-				surface_texture_array[0].remove_at(index)
-			else:
-				surface_texture_array[0][index] = texture
-		else:
-			surface_texture_array[0].append(texture)
-			
-	surface_texture_array[1].resize(surface_texture_array[0].size())
-		
-	if !is_albedo:
-		surface_texture_array[1][index] = texture
-	
-	update_textures()
 	
 func set_particle_draw_distance(value: int):
 	particle_draw_distance = value
@@ -163,89 +139,24 @@ func set_particle_mesh(mesh: Mesh, layer: int, index: int):
 	
 	update_particles()
 	
-func get_surface_textures():
-#	if surface_material:
-#		var albedo_array: TerrainTextureArray = surface_material.get_shader_parameter("texture_albedos")
-#		var normal_array: TerrainTextureArray = surface_material.get_shader_parameter("texture_normals")
-#		return [albedo_array.get_array(), normal_array.get_array()]
-#	return []
-	return surface_texture_array
-	
 func get_particle_meshes():
 	return particle_mesh_array
 	
-func get_surface_material():
-	return surface_material
-	
-func update_shader(force_reset: bool = false):
-	
-	if !surface_material:
-		surface_material = ShaderMaterial.new()
-		surface_material.set_shader(SURFACE_SHADER)
-	
-	if surface_material:
-		update_heightmap(force_reset)
-		update_normalmap(force_reset)
-		update_splatmaps(force_reset)
-		
+func set_material(material: TerrainMaterial):
+	surface_material = material
 	for mesh in lod_meshes:
 		mesh.surface_set_material(0, surface_material)
-		
-func update_heightmap(force: bool = false):
-	surface_material.set_shader_parameter("terrain_height", height)
-	var heightmap: ImageTexture = surface_material.get_shader_parameter("terrain_heightmap")
-	if !heightmap or force:
-		heightmap = ImageTexture.new()
-		var img: Image = Image.create(1025, 1025, false, Image.FORMAT_RH)
-		heightmap.set_image(img)
-		surface_material.set_shader_parameter("terrain_heightmap", heightmap)
-		
-func update_normalmap(force: bool = false):
-	var normalmap: ImageTexture = surface_material.get_shader_parameter("terrain_normalmap")
-	if !normalmap or force:
-		var heightmap: ImageTexture = surface_material.get_shader_parameter("terrain_heightmap")
-		var img: Image = heightmap.get_image().duplicate()
-		img.bump_map_to_normal_map(height)
-		img.shrink_x2()
-		img.generate_mipmaps()
-		if !normalmap:
-			normalmap = ImageTexture.new()
-		normalmap.set_image(img)
-		surface_material.set_shader_parameter("terrain_normalmap", normalmap)
-		
-func update_splatmaps(force: bool = false):
-	var splatmaps: PackedStringArray = ["terrain_splatmap_01","terrain_splatmap_02","terrain_splatmap_03","terrain_splatmap_04"]
-	var is_first: bool = true
-	for texture in splatmaps:
-		var splatmap: ImageTexture = surface_material.get_shader_parameter(texture)
-		if !splatmap or force:
-			splatmap = ImageTexture.new()
-			var img: Image = Image.create(1024, 1024, true, Image.FORMAT_RGBA8)
-			if is_first:
-				img.fill(Color(1,0,0,0))
-				is_first = false
-			splatmap.set_image(img)
-			surface_material.set_shader_parameter(texture, splatmap)
-
-func update_textures():
-	var albedo_array: Texture2DArray = surface_material.get_shader_parameter("texture_albedos")
-	var normal_array: Texture2DArray = surface_material.get_shader_parameter("texture_normals")
 	
-	if surface_texture_array.is_empty():
-		# Resizing to 2 and filling with Array does not create 2 unique Arrays????
-		surface_texture_array.append(Array())
-		surface_texture_array.append(Array())
+func get_material() -> TerrainMaterial:
+	return surface_material
 	
-	albedo_array = TerrainTextureArray.convert_array(surface_texture_array[0])
-	surface_material.set_shader_parameter("texture_albedos", albedo_array)
-
-	normal_array = TerrainTextureArray.convert_array(surface_texture_array[1])
-	surface_material.set_shader_parameter("texture_normals", normal_array)
-
-	var use_grid_texture: bool = albedo_array.get_layers() == 0
-	if use_grid_texture:
-		surface_material.set_shader_parameter("terrain_grid", DEFAULT_GRID_TEXTURE)
-	surface_material.set_shader_parameter("use_grid", use_grid_texture)
+func has_material() -> bool:
+	return surface_material != null
+	
+func update_material():
+	if surface_material:
+		surface_material.set_height(height)
+		surface_material.set_size(size)
 
 func update_particles():
 	
@@ -298,7 +209,7 @@ func update_particles():
 				var material: ShaderMaterial = emitter.get_process_material()
 				if !material:
 					material = ShaderMaterial.new()
-					material.set_shader(PARTICLE_SHADER)
+					material.set_shader(_PARTICLE_SHADER)
 					material.set_shader_parameter("terrain_heightmap", surface_material.get_shader_parameter("terrain_heightmap"))
 					material.set_shader_parameter("terrain_normalmap", surface_material.get_shader_parameter("terrain_normalmap"))
 					emitter.set_process_material(material)
@@ -321,9 +232,8 @@ func update():
 	
 	if lod_meshes.is_empty():
 		return
-		
-	update_shader()
-	update_textures()
+
+	update_material()
 	update_particles()
 	update_collision()
 
@@ -343,10 +253,8 @@ func update():
 	update_aabb()
 	
 func clear():
-	
 	for i in chunks:
 		i.queue_free()
-		
 	chunks.clear()
 	
 func update_aabb():
@@ -357,35 +265,50 @@ func update_aabb():
 		
 func update_collision():
 	
-	if !collision:
-		collision = StaticBody3D.new()
-		add_child(collision)
-	
+	if !physics_body:
+		physics_body = StaticBody3D.new()
+		add_child(physics_body)
+
 	var collision_shape: CollisionShape3D
-	if collision.get_child_count() > 0:
-		collision_shape = collision.get_child(0)
+	if physics_body.get_child_count() > 0:
+		collision_shape = physics_body.get_child(0)
 	
 	if !collision_shape:
 		collision_shape = CollisionShape3D.new()
-		collision.add_child(collision_shape)
+		physics_body.add_child(collision_shape)
 		var shape: HeightMapShape3D = HeightMapShape3D.new()
 		collision_shape.set_shape(shape)
 	
 	var shape_size: int = size + 1
+	var collision_scale: float = 1.0
+	
+	if Engine.is_editor_hint():
+		# use smaller collider in editor for faster editing
+		shape_size = _EDITOR_COLLISION_SIZE + 1
+		collision_scale = size / _EDITOR_COLLISION_SIZE
+	else:
+		# let's not mess with the collision layers in the editor
+		physics_body.collision_layer = collision_layer
+		physics_body.collision_mask = collision_mask
+	
+	# non-uniform scaling is usually bad for collision detection
+	physics_body.scale = Vector3(collision_scale, 1.0, collision_scale)
+	
 	collision_shape.shape.map_width = shape_size
 	collision_shape.shape.map_depth = shape_size
 	
-	var hmap: Image = get_surface_material().get_shader_parameter("terrain_heightmap").get_image()
-	
-	var map_data: PackedFloat32Array = PackedFloat32Array()
-	
-	for y in shape_size:
-		for x in shape_size:
-			var uv: Vector2 = Vector2(x,y) / float(shape_size)
-			var h: float = hmap.get_pixelv(Vector2(hmap.get_size()) * uv).r * height
-			map_data.push_back(h)
-	
-	collision_shape.shape.set_map_data(map_data)
+	if has_material():
+		var hmap: Image = get_material().get_heightmap().get_image()
+		
+		var map_data: PackedFloat32Array = PackedFloat32Array()
+		
+		for y in shape_size:
+			for x in shape_size:
+				var uv: Vector2 = Vector2(x,y) / float(shape_size)
+				var h: float = hmap.get_pixelv(Vector2(hmap.get_size()) * uv).r * height
+				map_data.push_back(h)
+		
+		collision_shape.shape.set_map_data(map_data)
 	
 func update_lod():
 	
@@ -416,16 +339,6 @@ func _notification(what):
 		
 func _get_property_list():
 	var property_list: Array = [
-		{
-			"name": "surface_material",
-			"type": TYPE_OBJECT,
-			"usage": PROPERTY_USAGE_READ_ONLY | PROPERTY_USAGE_DEFAULT,
-		},
-		{
-			"name": "surface_texture_array",
-			"type": TYPE_ARRAY,
-			"usage": PROPERTY_USAGE_STORAGE,
-		},
 		{
 			"name": "particle_mesh_array",
 			"type": TYPE_ARRAY,

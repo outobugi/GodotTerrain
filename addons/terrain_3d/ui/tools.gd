@@ -135,33 +135,33 @@ func clear_mesh_layers():
 	
 func load_textures(data: Array, callback: Callable):
 	clear_texture_layers()
-	
-	if data.is_empty():
-		return
-	
-	var albedo_arr: Array = data[0]
-	var normal_arr: Array = data[1]
-	
-	var layer_count: int = albedo_arr.size()
+
 	var show_next_empty: bool = false
+	var layer_count: int = 0
 	
-	for i in layer_count:
-		var layer: TextureLayerContainer = TextureLayerContainer.new(i)
-		var albedo: Texture2D = albedo_arr[i]
-		var normal: Texture2D = null
+	if !data.is_empty():
+		var albedo_arr: Array = data[0]
+		var normal_arr: Array = data[1]
 		
-		if i < normal_arr.size():
-			normal = normal_arr[i]
+		layer_count = albedo_arr.size()
 		
-		show_next_empty = normal != null
-		
-		layer.set_layer_data(albedo, normal)
-		layer.set_selected(i == texture_layer - 1)
-		
-		layer.connect("selected", _on_texture_selected)
-		layer.connect("changed", callback)
-		
-		texture_layers_list.add_child(layer)
+		for i in layer_count:
+			var layer: TextureLayerContainer = TextureLayerContainer.new(i)
+			var albedo: Texture2D = albedo_arr[i]
+			var normal: Texture2D = null
+			
+			if i < normal_arr.size():
+				normal = normal_arr[i]
+			
+			show_next_empty = normal != null
+			
+			layer.set_layer_data(albedo, normal)
+			layer.set_selected(i == texture_layer - 1)
+			
+			layer.connect("selected", _on_texture_selected)
+			layer.connect("changed", callback)
+			
+			texture_layers_list.add_child(layer)
 		
 	texture_layer_error.set_visible(!show_next_empty)
 		
