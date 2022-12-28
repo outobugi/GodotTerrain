@@ -5,6 +5,8 @@ class_name TerrainMaterial
 
 const _SHADER: Shader = preload("res://addons/terrain_3d/terrain.gdshader")
 const _DEFAULT_GRID_TEXTURE: Texture2D = preload("res://addons/terrain_3d/temp/grid_albedo.png")
+
+const SPLATMAP_SIZE: int = 1024
 const MAX_SPLATMAP: int = 4
 
 @export var show_data: bool = false :
@@ -50,6 +52,8 @@ func enable_grid(enable: bool):
 func set_size(size: int):
 	resolution_size = size
 	RenderingServer.material_set_param(get_rid(), "terrain_size", float(size))
+	update_heightmap(true)
+	update_normalmap(true)
 	emit_changed()
 	
 func set_height(height: int):
@@ -61,11 +65,14 @@ func set_height(height: int):
 func get_heightmap():
 	return map_heightmap
 	
-func update_heightmap():
+func update_heightmap(resize: bool = false):
+	var map_size: int = (resolution_size/2)+1
 	if !map_heightmap:
 		map_heightmap = ImageTexture.new()
-		var img: Image = Image.create(1025, 1025, false, Image.FORMAT_RH)
+		var img: Image = Image.create(map_size, map_size, false, Image.FORMAT_RH)
 		map_heightmap.set_image(img)
+	if resize:
+		map_heightmap.get_image().resize(map_size, map_size)
 	RenderingServer.material_set_param(get_rid(), "terrain_heightmap", map_heightmap.get_rid())
 	
 func get_normalmap():
@@ -107,7 +114,7 @@ func update_splatmaps():
 		var splatmap: ImageTexture = get_splatmap(map)
 		if !splatmap:
 			splatmap = ImageTexture.new()
-			var img: Image = Image.create(1024, 1024, true, Image.FORMAT_RGBA8)
+			var img: Image = Image.create(SPLATMAP_SIZE, SPLATMAP_SIZE, true, Image.FORMAT_RGBA8)
 			if is_first:
 				img.fill(Color(1,0,0,0))
 				is_first = false

@@ -8,10 +8,10 @@ uniform sampler2D terrain_heightmap : filter_linear_mipmap, repeat_disable;
 uniform sampler2D terrain_normalmap : filter_linear_mipmap, repeat_disable;
 uniform sampler2D terrain_globalmap : filter_linear_mipmap, repeat_disable;
 
-uniform sampler2D terrain_splatmap_01 : filter_linear_mipmap, repeat_disable;
-uniform sampler2D terrain_splatmap_02 : filter_linear_mipmap, repeat_disable;
-uniform sampler2D terrain_splatmap_03 : filter_linear_mipmap, repeat_disable;
-uniform sampler2D terrain_splatmap_04 : filter_linear_mipmap, repeat_disable;
+uniform sampler2D terrain_splatmap_01 : filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D terrain_splatmap_02 : filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D terrain_splatmap_03 : filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D terrain_splatmap_04 : filter_linear_mipmap_anisotropic, repeat_disable;
 
 uniform sampler2DArray texture_albedos : source_color, filter_linear_mipmap_anisotropic;
 uniform sampler2DArray texture_normals : filter_linear_mipmap_anisotropic, hint_normal;

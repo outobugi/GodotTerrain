@@ -18,16 +18,10 @@ _global_script_classes=[{
 "class": &"TerrainMaterial",
 "language": &"GDScript",
 "path": "res://addons/terrain_3d/terrain_material.gd"
-}, {
-"base": "Texture2DArray",
-"class": &"TerrainTextureArray",
-"language": &"GDScript",
-"path": "res://addons/terrain_3d/terrain_texture_array.gd"
 }]
 _global_script_class_icons={
 "Terrain": "res://addons/terrain_3d/icons/icon_terrain.svg",
-"TerrainMaterial": "res://addons/terrain_3d/icons/icon_terrain_material.svg",
-"TerrainTextureArray": ""
+"TerrainMaterial": "res://addons/terrain_3d/icons/icon_terrain_material.svg"
 }
 
 [application]

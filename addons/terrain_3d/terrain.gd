@@ -71,7 +71,8 @@ func _process(delta):
 	if !camera:
 		if Engine.is_editor_hint():
 			camera = TerrainUtil.get_camera()
-		camera = get_viewport().get_camera_3d()
+		else:
+			camera = get_viewport().get_camera_3d()
 	else:
 		var camera_position = camera.global_transform.origin * Vector3(1,0,1)
 		var distance_traveled: float = previous_camera_position.distance_to(camera_position)
