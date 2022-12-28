@@ -151,7 +151,7 @@ func paint_height(uv: Vector2):
 				heightmap_img.set_pixelv(pixel_position, color)
 	
 	heightmap.set_image(heightmap_img)
-	current_terrain.get_material().update_normalmap(true)
+	current_terrain.get_material().update_normalmap()
 
 func paint_splat(uv: Vector2):
 	

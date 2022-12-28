@@ -156,8 +156,7 @@ func has_material() -> bool:
 	
 func update_material():
 	if surface_material:
-		surface_material.set_height(height)
-		surface_material.set_size(size)
+		surface_material.set_resolution(size, height)
 
 func update_particles():
 	
@@ -237,7 +236,7 @@ func update():
 	update_material()
 	update_particles()
 	update_collision()
-
+	
 	var chunk_size = size / partition
 	var chunk_offset = Vector3(1,0,1) * (chunk_size / 2)
 	

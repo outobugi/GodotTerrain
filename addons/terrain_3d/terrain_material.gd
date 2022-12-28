@@ -5,6 +5,7 @@ class_name TerrainMaterial
 
 const _SHADER: Shader = preload("res://addons/terrain_3d/terrain.gdshader")
 const _DEFAULT_GRID_TEXTURE: Texture2D = preload("res://addons/terrain_3d/temp/grid_albedo.png")
+const _NORMALMAP_SHADER: Shader = preload("res://addons/terrain_3d/height_to_normal.gdshader")
 
 const SPLATMAP_SIZE: int = 1024
 const MAX_SPLATMAP: int = 4
@@ -32,6 +33,8 @@ var texture_arrays: Array[Array]
 var texture_albedo: Texture2DArray
 var texture_normal: Texture2DArray
 
+var _viewport_normalmap: SubViewport
+
 func _init():
 	RenderingServer.material_set_shader(get_rid(), _SHADER.get_rid())
 	RenderingServer.shader_set_default_texture_parameter(_SHADER.get_rid(), "terrain_grid", _DEFAULT_GRID_TEXTURE.get_rid())
@@ -52,45 +55,85 @@ func enable_grid(enable: bool):
 func set_size(size: int):
 	resolution_size = size
 	RenderingServer.material_set_param(get_rid(), "terrain_size", float(size))
-	update_heightmap(true)
-	update_normalmap(true)
+	update_heightmap()
+	update_normalmap()
 	emit_changed()
 	
 func set_height(height: int):
 	resolution_height = height
-	update_normalmap(true)
+	update_normalmap()
 	RenderingServer.material_set_param(get_rid(), "terrain_height", float(height))
+	emit_changed()
+	
+func set_resolution(size: int, height: int):
+	resolution_height = height
+	resolution_size = size
+	RenderingServer.material_set_param(get_rid(), "terrain_size", float(size))
+	RenderingServer.material_set_param(get_rid(), "terrain_height", float(height))
+	update_heightmap()
+	update_normalmap()
 	emit_changed()
 	
 func get_heightmap():
 	return map_heightmap
 	
-func update_heightmap(resize: bool = false):
+func update_heightmap():
+	# half map sizes cuz gotta go fast
 	var map_size: int = (resolution_size/2)+1
 	if !map_heightmap:
 		map_heightmap = ImageTexture.new()
 		var img: Image = Image.create(map_size, map_size, false, Image.FORMAT_RH)
 		map_heightmap.set_image(img)
-	if resize:
+	if map_heightmap.get_size() != Vector2(map_size, map_size):
 		map_heightmap.get_image().resize(map_size, map_size)
+		map_heightmap.emit_changed()
 	RenderingServer.material_set_param(get_rid(), "terrain_heightmap", map_heightmap.get_rid())
 	
 func get_normalmap():
 	return map_normalmap
 	
-func update_normalmap(force: bool = false):
-	if !map_normalmap or force:
-		var img: Image = get_heightmap().get_image().duplicate()
-		img.bump_map_to_normal_map(resolution_height)
-		img.shrink_x2()
-		img.generate_mipmaps()
-		if !map_normalmap:
-			map_normalmap = ImageTexture.new()
-		map_normalmap.set_image(img)
-	RenderingServer.material_set_param(get_rid(), "terrain_normalmap", map_normalmap.get_rid())
-	if force:
-		emit_changed()
+func update_normalmap():
 	
+	if !Engine.is_editor_hint():
+		if _viewport_normalmap:
+			_viewport_normalmap.queue_free()
+		return
+	
+	if !map_normalmap:
+		map_normalmap = ImageTexture.new()
+		
+	# This feels so damn hacky bruv
+	if !_viewport_normalmap:
+		_viewport_normalmap = SubViewport.new()
+		_viewport_normalmap.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
+		_viewport_normalmap.world_2d = World2D.new()
+		_viewport_normalmap.disable_3d = true
+		
+		Engine.get_main_loop().get_root().add_child(_viewport_normalmap)
+		
+		var nmap_mat: ShaderMaterial = ShaderMaterial.new()
+		nmap_mat.shader = _NORMALMAP_SHADER
+		var canvas: CanvasItem = Sprite2D.new()
+		canvas.centered = false
+		canvas.material = nmap_mat
+		canvas.texture = map_heightmap
+		
+		_viewport_normalmap.add_child(canvas)
+	
+	_viewport_normalmap.get_child(0).material.set_shader_parameter("height", resolution_height)
+		
+	var hmap_size: Vector2i = Vector2i(map_heightmap.get_size())
+	if _viewport_normalmap.size != hmap_size:
+		_viewport_normalmap.size = hmap_size
+	
+	_viewport_normalmap.render_target_update_mode = SubViewport.UPDATE_ONCE
+	
+	await RenderingServer.frame_post_draw
+	
+	map_normalmap.set_image(_viewport_normalmap.get_texture().get_image())
+		
+	RenderingServer.material_set_param(get_rid(), "terrain_normalmap", map_normalmap.get_rid())
+
 func _set_splatmap(index: int, map: ImageTexture):
 	match index:
 		0: map_splatmap_1 = map
