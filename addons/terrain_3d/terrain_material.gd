@@ -7,8 +7,9 @@ const _SHADER: Shader = preload("res://addons/terrain_3d/terrain.gdshader")
 const _DEFAULT_GRID_TEXTURE: Texture2D = preload("res://addons/terrain_3d/temp/grid_albedo.png")
 const _NORMALMAP_SHADER: Shader = preload("res://addons/terrain_3d/height_to_normal.gdshader")
 
+const SPLATMAPS: PackedStringArray = ["terrain_splatmap_01","terrain_splatmap_02","terrain_splatmap_03","terrain_splatmap_04"]
 const SPLATMAP_SIZE: int = 1024
-const MAX_SPLATMAP: int = 4
+const SPLATMAP_MAX: int = 4
 
 @export var show_data: bool = false :
 	set(show):
@@ -29,6 +30,7 @@ var map_splatmap_3: Texture2D
 var map_splatmap_4: Texture2D
 
 var editor_map_normalmap: ViewportTexture
+var editor_map_heightmap: ViewportTexture
 
 var texture_arrays: Array[Array]
 
@@ -77,8 +79,19 @@ func set_resolution(size: int, height: int):
 	_update_normalmap()
 	emit_changed()
 	
+func set_heightmap(map: Texture2D, temp: bool = false):
+	if temp:
+		editor_map_heightmap = map
+	else:
+		map_heightmap = map
+	_update_heightmap()
+	emit_changed()
+	
 func get_heightmap():
 	return map_heightmap
+	
+func apply_editor_heightmap():
+	map_heightmap.set_image(editor_map_heightmap.get_image())
 	
 func _update_heightmap():
 	var map_size: int = (resolution_size)+1
@@ -133,8 +146,8 @@ func set_splatmap(index: int, map: Texture2D):
 		1: map_splatmap_2 = map
 		2: map_splatmap_3 = map
 		3: map_splatmap_4 = map
-	var splatmaps: PackedStringArray = ["terrain_splatmap_01","terrain_splatmap_02","terrain_splatmap_03","terrain_splatmap_04"]
-	RenderingServer.material_set_param(get_rid(), splatmaps[index], map.get_rid())
+	
+	RenderingServer.material_set_param(get_rid(), SPLATMAPS[index], map.get_rid())
 	emit_changed()
 	
 func get_splatmap(index: int):
@@ -147,7 +160,7 @@ func get_splatmap(index: int):
 	
 func _update_splatmaps():
 	var is_first: bool = true
-	for map in MAX_SPLATMAP:
+	for map in SPLATMAP_MAX:
 		var splatmap: ImageTexture = get_splatmap(map)
 		if !splatmap:
 			splatmap = ImageTexture.new()

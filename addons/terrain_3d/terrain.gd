@@ -3,6 +3,15 @@ class_name Terrain3D
 extends Node3D
 @icon("res://addons/terrain_3d/icons/icon_terrain.svg")
 
+## Terrain3D creates a grid of MeshInstance3D's with varying LOD meshes.
+##
+## Similar to GridMap, it handles the rendering and collision internally.
+## It uses [HeightMapShape3D] for collision and a special [TerrainMaterial] for rendering.
+## Supports terrains up to 64km2 in size.[br]
+## [br]
+## [b]Note:[/b] It is recommended to save the [TerrainMaterial] to disk as a binary resource (.res or .material) for faster load times.
+
+## Emitted when size or height changes.
 signal resolution_changed()
 signal material_changed()
 
@@ -11,6 +20,9 @@ const _DEFAULT_GRID_TEXTURE: Texture2D = preload("res://addons/terrain_3d/temp/g
 const _PARTICLE_SHADER: Shader = preload("res://addons/terrain_3d/particle.gdshader")
 const _EDITOR_COLLISION_SIZE: int = 256
 const _MIN_TRAVEL_DISTANCE: float = 8.0
+
+var _previous_camera_position: Vector3
+var _update_pending: bool = false
 
 @export_enum("512:512", "1024:1024", "2048:2048", "4096:4096", "8192:8192") var size: int = 1024 :
 	set = set_size
@@ -42,7 +54,7 @@ const _MIN_TRAVEL_DISTANCE: float = 8.0
 @export var particle_density: int = 4 :
 	set = set_particle_density
 
-var particle_process_material: ShaderMaterial # Unused for now because particle shader don't support per instance uniforms
+var particle_process_material: ShaderMaterial # Unused for now because particle shader doesn't support per instance uniforms
 var particle_mesh_array: Array[Array]
 var particle_mask_texture: Texture2D
 
@@ -57,18 +69,13 @@ var chunks: Array
 var camera: Camera3D
 var physics_body: StaticBody3D
 
-var _previous_camera_position: Vector3
-var _update_pending: bool = false
 
 func _init():
-	
 	set_notify_transform(true)
-	
 	if !is_inside_tree():
 		_update_pending = true
 		call_deferred("update")
 		
-
 func _exit_tree():
 	set_process(false)
 		
@@ -132,6 +139,7 @@ func set_lod_count(value: int):
 		if !_update_pending:
 			call_deferred("update")
 		
+## Disables/freezes LOD processing.
 func set_disabled(value: bool):
 	set_process(!value)
 	lod_disable = value
@@ -140,10 +148,12 @@ func set_particle_draw_distance(value: int):
 	particle_draw_distance = value
 	update_particles()
 	
+## Sets the density/spacing of the particles drawn on the terrain
 func set_particle_density(value: int):
 	particle_density = max(value, 1)
 	update_particles()
 	
+## Sets an mesh to a specific particle emitter.
 func set_particle_mesh(mesh: Mesh, layer: int, index: int):
 	if index < particle_mesh_array[0].size():
 		if mesh == null:
@@ -158,9 +168,11 @@ func set_particle_mesh(mesh: Mesh, layer: int, index: int):
 	
 	update_particles()
 	
+## Returns an array of particle meshes used in the particle rendering.
 func get_particle_meshes():
 	return particle_mesh_array
 	
+## Sets the [TerrainMaterial] to all LOD meshes.
 func set_material(material: TerrainMaterial):
 	surface_material = material
 	surface_material.call_deferred("set_height", height)
@@ -171,16 +183,20 @@ func set_material(material: TerrainMaterial):
 	for mesh in lod_meshes:
 		mesh.surface_set_material(0, surface_material)
 	
+## Returns the assigned [TerrainMaterial]
 func get_material() -> TerrainMaterial:
 	return surface_material
 	
+## Check if the terrain has [TerrainMaterial]
 func has_material() -> bool:
 	return surface_material != null
 	
+## Passes terrain properties to the [TerrainMaterial]
 func update_material():
 	if surface_material:
 		surface_material.set_resolution(size, height)
 
+## Update or creates an array of [GPUParticles3D].
 func update_particles():
 	
 	if particle_mesh_array.is_empty():
@@ -248,6 +264,7 @@ func update_particles():
 				
 			index += 1
 		
+## Updates all of the terrain. Calls every [i]update_[/i] function.
 func update():
 
 	clear()
@@ -278,17 +295,20 @@ func update():
 	
 	_update_pending = false
 	
+## Removes all chunks from the terrain.
 func clear():
 	for i in chunks:
 		i.queue_free()
 	chunks.clear()
 	
+## Updates each chunk's [AABB] to match the terrain height
 func update_aabb():
 	for chunk in chunks:
 		var aabb: AABB = chunk.get_aabb()
 		aabb.size.y = height * 2
 		chunk.set_custom_aabb(aabb)
 		
+## Creates a missing or updates current [StaticBody] with [HeightMapShape3D] and applies existing heightmap to it.
 func update_collision():
 	
 	if !physics_body:
@@ -336,6 +356,7 @@ func update_collision():
 		
 		collision_shape.shape.set_map_data(map_data)
 	
+## Updates chunk mesh LODs
 func update_lod():
 	
 	if !lod_count:

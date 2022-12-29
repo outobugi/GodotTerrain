@@ -202,7 +202,7 @@ func paint_splat(uv: Vector2):
 	
 	var rand_rotation = PI * randf()
 
-	for i in TerrainMaterial.MAX_SPLATMAP:
+	for i in TerrainMaterial.SPLATMAP_MAX:
 		
 		var splatmap_img: Image = current_terrain.get_material().get_splatmap(i).get_image()
 		var splatmap_size: Vector2i = splatmap_img.get_size()
