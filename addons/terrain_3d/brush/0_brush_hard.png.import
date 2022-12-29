@@ -1,0 +1,14 @@
+[remap]
+
+importer="image"
+type="Image"
+uid="uid://c44708fuuoc0x"
+path="res://.godot/imported/0_brush_hard.png-ecd89197f3857df7dee5931668dc9a31.image"
+
+[deps]
+
+source_file="res://addons/terrain_3d/brush/0_brush_hard.png"
+dest_files=["res://.godot/imported/0_brush_hard.png-ecd89197f3857df7dee5931668dc9a31.image"]
+
+[params]
+

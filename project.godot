@@ -10,7 +10,7 @@ config_version=5
 
 _global_script_classes=[{
 "base": "Node3D",
-"class": &"Terrain",
+"class": &"Terrain3D",
 "language": &"GDScript",
 "path": "res://addons/terrain_3d/terrain.gd"
 }, {
@@ -20,7 +20,7 @@ _global_script_classes=[{
 "path": "res://addons/terrain_3d/terrain_material.gd"
 }]
 _global_script_class_icons={
-"Terrain": "res://addons/terrain_3d/icons/icon_terrain.svg",
+"Terrain3D": "res://addons/terrain_3d/icons/icon_terrain.svg",
 "TerrainMaterial": "res://addons/terrain_3d/icons/icon_terrain_material.svg"
 }
 

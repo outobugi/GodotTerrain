@@ -1,13 +1,16 @@
 @tool
 extends EditorPlugin
 
-const FILE_TOOLBAR: PackedScene = preload("res://addons/terrain_3d/ui/tools.tscn")
+const TOOLBAR_UI: PackedScene = preload("res://addons/terrain_3d/ui/tools.tscn")
+const GPUPainter: Script = preload("res://addons/terrain_3d/gpu_painter.gd")
 
-var current_terrain: Terrain
+var current_terrain: Terrain3D
 var is_active: bool = false
 
 var mouse_is_pressed: bool = false
+var pending_collision_update: bool = false
 var toolbar: Control
+var gpu_painter: Node
 
 var color_channels: Array[Color] = [
 	Color(1,0,0,0),
@@ -17,28 +20,59 @@ var color_channels: Array[Color] = [
 ]
 
 func _enter_tree():
-	if !toolbar:
-		toolbar = FILE_TOOLBAR.instantiate()
+	toolbar = TOOLBAR_UI.instantiate()
 	toolbar.hide()
+	toolbar.accent_color = get_editor_interface().get_editor_settings().get_setting("interface/theme/accent_color")
 	toolbar.call_deferred("init_tools")
 	add_control_to_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_SIDE_RIGHT, toolbar)
-
-func _exit_tree():
 	
+	gpu_painter = GPUPainter.new()
+	add_child(gpu_painter)
+	
+func _exit_tree():
 	remove_control_from_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_SIDE_RIGHT, toolbar)
 	toolbar.queue_free()
-	toolbar = null
-
-func _handles(obj):
-	if obj is Terrain:
-		set_edited_terrain(obj)
+	gpu_painter.queue_free()
+	
+func _handles(object: Variant):
+	if object is Terrain3D:
 		return true
-	set_edited_terrain(null)
 	return false
 	
+func _edit(object: Variant):
+	if object is Terrain3D:
+		call_deferred("load_textures")
+		call_deferred("load_meshes")
+		
+		gpu_painter.attach_terrain_material(object.get_material())
+		
+		if !object.is_connected("material_changed", _terrain_on_material_changed):
+			object.connect("material_changed", _terrain_on_material_changed)
+		if !object.is_connected("resolution_changed", _terrain_on_resolution_changed):
+			object.connect("resolution_changed", _terrain_on_resolution_changed)
+			
+		current_terrain = object
+	
+func _clear():
+	
+	if is_terrain_valid():
+		if current_terrain.is_connected("material_changed", _terrain_on_material_changed):
+			current_terrain.disconnect("material_changed", _terrain_on_material_changed)
+		if current_terrain.is_connected("resolution_changed", _terrain_on_resolution_changed):
+			current_terrain.disconnect("resolution_changed", _terrain_on_resolution_changed)
+	current_terrain = null
+	
 func _make_visible(visible: bool):
+	
+	if !visible and is_active:
+		gpu_painter.clear()
+		
 	is_active = visible
 	toolbar.visible = visible
+
+func _apply_changes():
+	if is_terrain_valid():
+		current_terrain.get_material().apply_editor_normalmap()
 	
 func _forward_3d_gui_input(camera: Camera3D, event: InputEvent):
 	
@@ -64,27 +98,31 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent):
 					
 					if !ray_data.is_empty():
 						
-						var uv: Vector2 = get_uv_from(ray_data.position)
-						
-						if toolbar.tool_mode == toolbar.ToolMode.HEIGHT:
-							paint_height(uv)
-						if toolbar.tool_mode == toolbar.ToolMode.TEXTURE:
-							paint_splat(uv)
+						if current_terrain.has_material():
+							var uv: Vector2 = get_uv_from(ray_data.position)
+							
+							if toolbar.tool_mode == toolbar.ToolMode.HEIGHT:
+								paint_height(uv)
+								pending_collision_update = true
+							if toolbar.tool_mode == toolbar.ToolMode.TEXTURE:
+								paint_splat(uv)
 							
 				if was_pressed and !mouse_is_pressed:
-					current_terrain.update_collision()
+					if pending_collision_update:
+						pending_collision_update = false
+						current_terrain.update_collision()
 							
 				if mouse_is_pressed:
 					return EditorPlugin.AFTER_GUI_INPUT_STOP
 
 func is_terrain_valid():
-	return current_terrain != null
+	return is_instance_valid(current_terrain)
+
+func _terrain_on_material_changed():
+	gpu_painter.attach_terrain_material(current_terrain.get_material())
 	
-func set_edited_terrain(terrain: Terrain):
-	current_terrain = terrain
-	if current_terrain:
-		call_deferred("load_textures")
-		call_deferred("load_meshes")
+func _terrain_on_resolution_changed():
+	gpu_painter.update_resolution(current_terrain.get_size(), current_terrain.get_height())
 
 func get_uv_from(pos: Vector3):
 	return (Vector2(pos.x, pos.z) / float(current_terrain.size)) + Vector2(0.5, 0.5)
@@ -149,10 +187,9 @@ func paint_height(uv: Vector2):
 				var color: Color = heightmap_img.get_pixelv(pixel_position).lerp(Color.WHITE * brush_height, alpha)
 			
 				heightmap_img.set_pixelv(pixel_position, color)
-	
-	heightmap.set_image(heightmap_img)
-	current_terrain.get_material().update_normalmap()
 
+	heightmap.set_image(heightmap_img)
+	
 func paint_splat(uv: Vector2):
 	
 	var brush_size = toolbar.get_brush_size()
@@ -193,4 +230,3 @@ func paint_splat(uv: Vector2):
 					splatmap_img.set_pixelv(pixel_position, color)
 		
 		current_terrain.get_material().get_splatmap(i).set_image(splatmap_img)
-	

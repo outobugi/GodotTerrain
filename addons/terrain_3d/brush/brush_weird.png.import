@@ -1,0 +1,14 @@
+[remap]
+
+importer="image"
+type="Image"
+uid="uid://cpuaxox6k7ul6"
+path="res://.godot/imported/brush_weird.png-6ae299081e683f173b73bcf3ec3c43e6.image"
+
+[deps]
+
+source_file="res://addons/terrain_3d/brush/brush_weird.png"
+dest_files=["res://.godot/imported/brush_weird.png-6ae299081e683f173b73bcf3ec3c43e6.image"]
+
+[params]
+

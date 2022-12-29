@@ -1,0 +1,14 @@
+[remap]
+
+importer="image"
+type="Image"
+uid="uid://cpaahs2uvfog1"
+path="res://.godot/imported/brush_cracks.png-01c4bcdb0d17d16912c1190c37a17a39.image"
+
+[deps]
+
+source_file="res://addons/terrain_3d/brush/brush_cracks.png"
+dest_files=["res://.godot/imported/brush_cracks.png-01c4bcdb0d17d16912c1190c37a17a39.image"]
+
+[params]
+

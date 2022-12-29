@@ -21,19 +21,19 @@ var grid_texture_scale: float = 2.0
 var resolution_height: float = 64.0
 var resolution_size: float = 1024.0
 
-var map_heightmap: ImageTexture
-var map_normalmap: ImageTexture
-var map_splatmap_1: ImageTexture
-var map_splatmap_2: ImageTexture
-var map_splatmap_3: ImageTexture
-var map_splatmap_4: ImageTexture
+var map_heightmap: Texture2D
+var map_normalmap: Texture2D
+var map_splatmap_1: Texture2D
+var map_splatmap_2: Texture2D
+var map_splatmap_3: Texture2D
+var map_splatmap_4: Texture2D
+
+var editor_map_normalmap: ViewportTexture
 
 var texture_arrays: Array[Array]
 
 var texture_albedo: Texture2DArray
 var texture_normal: Texture2DArray
-
-var _viewport_normalmap: SubViewport
 
 func _init():
 	RenderingServer.material_set_shader(get_rid(), _SHADER.get_rid())
@@ -55,86 +55,79 @@ func enable_grid(enable: bool):
 func set_size(size: int):
 	resolution_size = size
 	RenderingServer.material_set_param(get_rid(), "terrain_size", float(size))
-	update_heightmap()
-	update_normalmap()
+	_update_heightmap()
+	_update_normalmap()
 	emit_changed()
 	
 func set_height(height: int):
 	resolution_height = height
-	update_normalmap()
+	_update_normalmap()
 	RenderingServer.material_set_param(get_rid(), "terrain_height", float(height))
 	emit_changed()
+	
+func get_height():
+	return resolution_height
 	
 func set_resolution(size: int, height: int):
 	resolution_height = height
 	resolution_size = size
 	RenderingServer.material_set_param(get_rid(), "terrain_size", float(size))
 	RenderingServer.material_set_param(get_rid(), "terrain_height", float(height))
-	update_heightmap()
-	update_normalmap()
+	_update_heightmap()
+	_update_normalmap()
 	emit_changed()
 	
 func get_heightmap():
 	return map_heightmap
 	
-func update_heightmap():
-	# half map sizes cuz gotta go fast
-	var map_size: int = (resolution_size/2)+1
+func _update_heightmap():
+	var map_size: int = (resolution_size)+1
 	if !map_heightmap:
 		map_heightmap = ImageTexture.new()
 		var img: Image = Image.create(map_size, map_size, false, Image.FORMAT_RH)
 		map_heightmap.set_image(img)
 	if map_heightmap.get_size() != Vector2(map_size, map_size):
-		map_heightmap.get_image().resize(map_size, map_size)
-		map_heightmap.emit_changed()
+		var img: Image = map_heightmap.get_image()
+		img.resize(map_size, map_size)
+		map_heightmap.set_image(img)
 	RenderingServer.material_set_param(get_rid(), "terrain_heightmap", map_heightmap.get_rid())
+	
+func set_normalmap(map: Texture2D, temp: bool = false):
+	if temp:
+		editor_map_normalmap = map
+	else:
+		map_normalmap = map
+	_update_normalmap()
+	emit_changed()
 	
 func get_normalmap():
 	return map_normalmap
 	
-func update_normalmap():
+func apply_editor_normalmap():
+	map_normalmap.set_image(editor_map_normalmap.get_image())
 	
-	if !Engine.is_editor_hint():
-		if _viewport_normalmap:
-			_viewport_normalmap.queue_free()
-		return
+func _update_normalmap():
 	
 	if !map_normalmap:
 		map_normalmap = ImageTexture.new()
+		var map_size: Vector2 = map_heightmap.get_size()
+		var img: Image = Image.create(map_size.x, map_size.y, false, Image.FORMAT_RGB8)
+		img.fill(Color8(127, 127, 255))
+		map_normalmap.set_image(img)
 		
-	# This feels so damn hacky bruv
-	if !_viewport_normalmap:
-		_viewport_normalmap = SubViewport.new()
-		_viewport_normalmap.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
-		_viewport_normalmap.world_2d = World2D.new()
-		_viewport_normalmap.disable_3d = true
-		
-		Engine.get_main_loop().get_root().add_child(_viewport_normalmap)
-		
-		var nmap_mat: ShaderMaterial = ShaderMaterial.new()
-		nmap_mat.shader = _NORMALMAP_SHADER
-		var canvas: CanvasItem = Sprite2D.new()
-		canvas.centered = false
-		canvas.material = nmap_mat
-		canvas.texture = map_heightmap
-		
-		_viewport_normalmap.add_child(canvas)
+	var use_editor_normalmap: bool = false
+	var map: Variant = null
+	if editor_map_normalmap:
+		if !editor_map_normalmap.get_image().is_empty():
+			map = editor_map_normalmap.get_rid()
+			use_editor_normalmap = true
 	
-	_viewport_normalmap.get_child(0).material.set_shader_parameter("height", resolution_height)
+	if !use_editor_normalmap:
+		map = map_normalmap.get_rid()
 		
-	var hmap_size: Vector2i = Vector2i(map_heightmap.get_size())
-	if _viewport_normalmap.size != hmap_size:
-		_viewport_normalmap.size = hmap_size
+	RenderingServer.material_set_param(get_rid(), "terrain_normalmap", map)
 	
-	_viewport_normalmap.render_target_update_mode = SubViewport.UPDATE_ONCE
-	
-	await RenderingServer.frame_post_draw
-	
-	map_normalmap.set_image(_viewport_normalmap.get_texture().get_image())
-		
-	RenderingServer.material_set_param(get_rid(), "terrain_normalmap", map_normalmap.get_rid())
-
-func _set_splatmap(index: int, map: ImageTexture):
+func set_splatmap(index: int, map: Texture2D):
 	match index:
 		0: map_splatmap_1 = map
 		1: map_splatmap_2 = map
@@ -142,6 +135,7 @@ func _set_splatmap(index: int, map: ImageTexture):
 		3: map_splatmap_4 = map
 	var splatmaps: PackedStringArray = ["terrain_splatmap_01","terrain_splatmap_02","terrain_splatmap_03","terrain_splatmap_04"]
 	RenderingServer.material_set_param(get_rid(), splatmaps[index], map.get_rid())
+	emit_changed()
 	
 func get_splatmap(index: int):
 	match index:
@@ -151,7 +145,7 @@ func get_splatmap(index: int):
 		3: return map_splatmap_4
 	return null
 	
-func update_splatmaps():
+func _update_splatmaps():
 	var is_first: bool = true
 	for map in MAX_SPLATMAP:
 		var splatmap: ImageTexture = get_splatmap(map)
@@ -162,7 +156,7 @@ func update_splatmaps():
 				img.fill(Color(1,0,0,0))
 				is_first = false
 			splatmap.set_image(img)
-		_set_splatmap(map, splatmap)
+		set_splatmap(map, splatmap)
 		
 func get_textures():
 	return texture_arrays
@@ -198,9 +192,9 @@ func _update_textures():
 	enable_grid(texture_albedo.get_layers() == 0)
 	
 func _update():
-	update_heightmap()
-	update_normalmap()
-	update_splatmaps()
+	_update_heightmap()
+	_update_normalmap()
+	_update_splatmaps()
 	_update_textures()
 
 func _convert_array(arr: Array) -> Texture2DArray:
@@ -268,42 +262,42 @@ func _get_property_list():
 			"name": "map_heightmap",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
-			"hint_string": "ImageTexture",
+			"hint_string": "Texture2D",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{
 			"name": "map_normalmap",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
-			"hint_string": "ImageTexture",
+			"hint_string": "Texture2D",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{
 			"name": "map_splatmap_1",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
-			"hint_string": "ImageTexture",
+			"hint_string": "Texture2D",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{
 			"name": "map_splatmap_2",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
-			"hint_string": "ImageTexture",
+			"hint_string": "Texture2D",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{
 			"name": "map_splatmap_3",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
-			"hint_string": "ImageTexture",
+			"hint_string": "Texture2D",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{
 			"name": "map_splatmap_4",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
-			"hint_string": "ImageTexture",
+			"hint_string": "Texture2D",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{

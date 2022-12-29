@@ -1,33 +1,35 @@
 @tool
-class_name Terrain
+class_name Terrain3D
 extends Node3D
 @icon("res://addons/terrain_3d/icons/icon_terrain.svg")
+
+signal resolution_changed()
+signal material_changed()
 
 const _SURFACE_SHADER: Shader = preload("res://addons/terrain_3d/terrain.gdshader")
 const _DEFAULT_GRID_TEXTURE: Texture2D = preload("res://addons/terrain_3d/temp/grid_albedo.png")
 const _PARTICLE_SHADER: Shader = preload("res://addons/terrain_3d/particle.gdshader")
-
 const _EDITOR_COLLISION_SIZE: int = 256
-const MIN_TRAVEL_DISTANCE: float = 8.0
+const _MIN_TRAVEL_DISTANCE: float = 8.0
 
 @export_enum("512:512", "1024:1024", "2048:2048", "4096:4096", "8192:8192") var size: int = 1024 :
 	set = set_size
 @export var height: int = 64 :
 	set = set_height
-@export var partition: int = 8 : # Partition is the count of chunks on each side.
-	set = set_partition
 
 @export_group("LOD", "lod_")
-# Amount of LODs
+
 @export var lod_count: int = 4 :
 	set = set_lod_count
-# LOD change distance
+@export_enum("32:32", "64:64", "128:128", "256:256") var lod_size: int = 128 :
+	set = set_lod_size
+
 @export var lod_distance: int = 128
-# Freezes LOD processing
+
 @export var lod_disable: bool = false :
 	set = set_disabled
 	
-@export_group("Surface", "surface_")
+@export_group("Material", "surface_")
 
 @export var surface_material: TerrainMaterial :
 	set = set_material
@@ -54,15 +56,19 @@ var lod_meshes: Array
 var chunks: Array
 var camera: Camera3D
 var physics_body: StaticBody3D
-var previous_camera_position: Vector3
+
+var _previous_camera_position: Vector3
+var _update_pending: bool = false
 
 func _init():
 	
 	set_notify_transform(true)
 	
 	if !is_inside_tree():
+		_update_pending = true
 		call_deferred("update")
 		
+
 func _exit_tree():
 	set_process(false)
 		
@@ -75,10 +81,10 @@ func _process(delta):
 			camera = get_viewport().get_camera_3d()
 	else:
 		var camera_position = camera.global_transform.origin * Vector3(1,0,1)
-		var distance_traveled: float = previous_camera_position.distance_to(camera_position)
+		var distance_traveled: float = _previous_camera_position.distance_to(camera_position)
 		
-		if distance_traveled > MIN_TRAVEL_DISTANCE:
-			previous_camera_position = camera_position
+		if distance_traveled > _MIN_TRAVEL_DISTANCE:
+			_previous_camera_position = camera_position
 			
 			for chunk in chunks:
 				
@@ -97,22 +103,34 @@ func _process(delta):
 func set_size(value: int):
 	if value != size:
 		size = value
-		call_deferred("update")
+		emit_signal("resolution_changed")
+		if !_update_pending:
+			call_deferred("update")
+			
+func get_size():
+	return size
 		
 func set_height(value: int):
 	if value != height:
 		height = value
-		call_deferred("update")
-		
-func set_partition(value: int):
-	if value != partition:
-		partition = value
-		call_deferred("update")
+		emit_signal("resolution_changed")
+		if !_update_pending:
+			call_deferred("update")
+
+func get_height():
+	return height
+
+func set_lod_size(value: int):
+	if value != lod_size:
+		lod_size = value
+		if !_update_pending:
+			call_deferred("update")
 		
 func set_lod_count(value: int):
 	if value != lod_count:
 		lod_count = value
-		call_deferred("update")
+		if !_update_pending:
+			call_deferred("update")
 		
 func set_disabled(value: bool):
 	set_process(!value)
@@ -145,6 +163,11 @@ func get_particle_meshes():
 	
 func set_material(material: TerrainMaterial):
 	surface_material = material
+	surface_material.call_deferred("set_height", height)
+	surface_material.call_deferred("set_size", size)
+	
+	call_deferred("emit_signal", "material_changed")
+	
 	for mesh in lod_meshes:
 		mesh.surface_set_material(0, surface_material)
 	
@@ -231,26 +254,29 @@ func update():
 	update_lod()
 	
 	if lod_meshes.is_empty():
+		print("Terrain failed. No meshes were created.")
 		return
 
 	update_material()
 	update_particles()
 	update_collision()
 	
-	var chunk_size = size / partition
-	var chunk_offset = Vector3(1,0,1) * (chunk_size / 2)
+	var offset = Vector3(1,0,1) * (lod_size / 2)
 	
-	for x in partition:
-		for z in partition:
+	var side: int = size / lod_size
+	
+	for x in side:
+		for z in side:
 			var chunk: Chunk = Chunk.new()
 			add_child(chunk)
-			
 			chunk.set_mesh(lod_meshes[0]) 
-			var pos = Vector3(x - (partition / 2), 0, z - (partition / 2)) * chunk_size + chunk_offset
+			var pos = Vector3(x - (side / 2), 0, z - (side / 2)) * lod_size + offset
 			chunk.call_deferred("set_position", pos)
 			chunks.push_back(chunk)
 			
 	update_aabb()
+	
+	_update_pending = false
 	
 func clear():
 	for i in chunks:
@@ -312,24 +338,22 @@ func update_collision():
 	
 func update_lod():
 	
-	var chunk_size = size / partition
-		
-	if !lod_count or !chunk_size:
+	if !lod_count:
 		return 
 		
 	lod_meshes.resize(lod_count)
 	var previous_subdivision: int = 1
 	
-	var subdivision = (chunk_size / previous_subdivision)
+	var subdivision = (lod_size / previous_subdivision)
 	
 	for i in lod_count:
 		
-		var mesh = GridMesh.new(subdivision, chunk_size)
+		var mesh = GridMesh.new(subdivision, lod_size)
 		mesh.surface_set_material(0, surface_material)
 		lod_meshes[i] = mesh
 		
 		previous_subdivision *= 2
-		subdivision = (chunk_size / previous_subdivision)
+		subdivision = (lod_size / previous_subdivision)
 
 func _notification(what):
 	

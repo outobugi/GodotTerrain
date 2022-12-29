@@ -1,0 +1,14 @@
+[remap]
+
+importer="image"
+type="Image"
+uid="uid://ndihbptdhywj"
+path="res://.godot/imported/0_brush_default.png-ead2a5e6c33e44556fc2dc6bd0015ce5.image"
+
+[deps]
+
+source_file="res://addons/terrain_3d/brush/0_brush_default.png"
+dest_files=["res://.godot/imported/0_brush_default.png-ead2a5e6c33e44556fc2dc6bd0015ce5.image"]
+
+[params]
+

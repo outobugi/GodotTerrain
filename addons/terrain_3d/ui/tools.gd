@@ -3,6 +3,8 @@ extends VBoxContainer
 
 # A lot of duplicate code and bad naming and no comments
 
+const BRUSH_PREVIEW_MATERIAL: ShaderMaterial = preload("res://addons/terrain_3d/ui/brush_preview.material")
+
 enum ToolMode {
 	HEIGHT,
 	TEXTURE,
@@ -12,9 +14,9 @@ enum ToolMode {
 const MAX_BRUSH_SIZE: int = 512
 
 var tool_mode: ToolMode = ToolMode.HEIGHT
+var accent_color: Color
 var brush_size: int = 64
 var brush_opacity: float = 0.1
-var brush_shape_button_group: ButtonGroup
 var brush_height: float = 1.0
 var texture_layer: int = 1
 var texture_layer_buttons: Array[Button]
@@ -27,6 +29,8 @@ var texture_layer_buttons: Array[Button]
 @onready var brush_size_value = get_node("BrushSize/Value")
 @onready var brush_opacity_value = get_node("BrushOpacity/Value")
 @onready var brush_height_value = brush_height_control.get_node("Value")
+
+@onready var brush_shape_button_group: ButtonGroup = preload("res://addons/terrain_3d/ui/shape_group.tres")
 
 @onready var brush_shape_list = get_node("BrushShape/GridContainer")
 
@@ -63,8 +67,41 @@ func init_tools():
 	tool_paint_height.set_pressed(true)
 	set_tool_mode(true, ToolMode.HEIGHT)
 	
-	brush_shape_button_group = brush_shape_list.get_child(0).get_button_group()
+	load_brushes()
 	
+func load_brushes():
+	var path: String = "res://addons/terrain_3d/brush/"
+	var brush_directory: DirAccess = DirAccess.open(path)
+	var is_first: bool = true
+	
+	for button in brush_shape_list.get_children():
+		button.queue_free()
+	
+	brush_directory.list_dir_begin()
+	var brush_name = brush_directory.get_next()
+	while brush_name:
+		if !brush_directory.current_is_dir():
+			if brush_name.ends_with(".png"):
+				var brush: Image = load(path+brush_name)
+				var texture: ImageTexture = ImageTexture.create_from_image(brush)
+				var brush_button: TextureButton = TextureButton.new()
+				brush_button.ignore_texture_size = true
+				brush_button.toggle_mode = true
+				brush_button.action_mode = 0
+				brush_button.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+				brush_button.button_group = brush_shape_button_group
+				brush_button.custom_minimum_size = Vector2(24,24)
+				brush_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+				brush_button.texture_normal = texture
+				brush_button.material = BRUSH_PREVIEW_MATERIAL
+				brush_button.connect("toggled", _on_brush_selected.bind(brush_button))
+				if is_first:
+					brush_button.call_deferred("set_pressed", true)
+					is_first = false
+				brush_shape_list.add_child(brush_button)
+		brush_name = brush_directory.get_next()
+
+
 func set_tool_mode(toggle: bool, mode: ToolMode):
 	if toggle:
 		tool_mode = mode
@@ -97,7 +134,7 @@ func get_brush_opacity():
 	return brush_opacity_slider.get_value()
 	
 func get_brush_shape():
-	return brush_shape_button_group.get_pressed_button().get_button_icon().get_image()
+	return brush_shape_button_group.get_pressed_button().get_texture_normal().get_image()
 	
 func get_brush_height():
 	return brush_height_slider.get_value()
@@ -116,6 +153,11 @@ func brush_opacity_changed(new_value):
 func brush_height_changed(new_value):
 	brush_height = new_value
 	brush_height_value.set_text(str(new_value))
+	
+func _on_brush_selected(toggled: bool, brush_button: TextureButton):
+	for button in brush_shape_list.get_children():
+		button.modulate = Color.WHITE
+	brush_button.modulate = accent_color
 	
 func _on_texture_selected(id: int):
 	for layer in texture_layers_list.get_children():
