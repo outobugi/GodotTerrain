@@ -4,6 +4,9 @@ render_mode depth_draw_opaque, diffuse_burley;
 uniform float terrain_height = 128.0;
 uniform float terrain_size = 1024.0;
 
+uniform bool parallax_enabled = true;
+uniform float parallax_depth = 1.0;
+
 uniform sampler2D terrain_heightmap : filter_linear_mipmap, repeat_disable;
 uniform sampler2D terrain_normalmap : filter_linear_mipmap, repeat_disable;
 uniform sampler2D terrain_globalmap : filter_linear_mipmap, repeat_disable; // unsused
@@ -16,7 +19,8 @@ uniform sampler2D terrain_splatmap_04 : filter_linear_mipmap_anisotropic, repeat
 uniform sampler2DArray texture_albedos : source_color, filter_linear_mipmap_anisotropic;
 uniform sampler2DArray texture_normals : filter_linear_mipmap_anisotropic, hint_normal;
 
-uniform bool use_grid = true;
+uniform bool terrain_use_grid = true;
+uniform float terrain_grid_scale = 2.0;
 uniform sampler2D terrain_grid : source_color, filter_linear_mipmap_anisotropic;
 
 vec3 unpack_normal(vec4 rgba) {
@@ -107,9 +111,14 @@ vec3 get_stochastic_blend_weights(vec3 weights, float a, float b, float c, float
 	return out_weights;
 }
 
-vec4 stochastic_sample(sampler2DArray albedo, sampler2DArray normal, vec2 uv, float index, out vec4 out_normal){
-	vec2 skewV = mat2(vec2(1.0,1.0),vec2(-0.57735027 , 1.15470054))*uv * 3.464;
+vec2 parallax_mapping(vec2 uv, vec3 view, float height){  
+	return uv - view.xy * (1.0 - height) * parallax_depth * 0.02;  
+}
+
+
+vec4 stochastic_sample(sampler2DArray albedo, sampler2DArray normal, vec2 uv, float index, out vec4 out_normal, vec3 view){
 	
+	vec2 skewV = mat2(vec2(1.0,1.0),vec2(-0.57735027 , 1.15470054))*uv * 3.464;
 	vec2 vxID = floor(skewV);
 	vec2 fracV = fract(skewV);
 	vec3 barry = vec3(fracV.x,fracV.y,1.0-fracV.x-fracV.y);
@@ -124,13 +133,22 @@ vec4 stochastic_sample(sampler2DArray albedo, sampler2DArray normal, vec2 uv, fl
 	vec3 uv1 = vec3(uv+hash(bw_vx[0].xy), index);
 	vec3 uv2 = vec3(uv+hash(bw_vx[1].xy), index);
 	vec3 uv3 = vec3(uv+hash(bw_vx[2].xy), index);
-	float blend = 0.2;
+	
+	float h1 = textureGrad(albedo,uv1,ddx,ddy).a;
+	float h2 = textureGrad(albedo,uv2,ddx,ddy).a;
+	float h3 = textureGrad(albedo,uv3,ddx,ddy).a;
+	
+	if (parallax_enabled){
+		uv1.xy = parallax_mapping(uv1.xy, view, h1);
+		uv2.xy = parallax_mapping(uv2.xy, view, h2);
+		uv3.xy = parallax_mapping(uv3.xy, view, h3);
+	}
 	
 	vec4 col1 = textureGrad(albedo,uv1,ddx,ddy);
 	vec4 col2 = textureGrad(albedo,uv2,ddx,ddy);
 	vec4 col3 = textureGrad(albedo,uv3,ddx,ddy);
 	
-	vec3 weights = get_stochastic_blend_weights(bw_vx[3].xyz, col1.a, col2.a, col3.a, 0.2);
+	vec3 weights = get_stochastic_blend_weights(bw_vx[3].xyz, h1, h2, h3, 0.1);
 	
 	vec4 col = (col1*weights.x) + (col2*weights.y) + (col3*weights.z);
 	
@@ -210,29 +228,21 @@ void fragment() {
 	vec4 ab0, ab1, ab2, ab3;
 	vec4 nr0, nr1, nr2, nr3;
 	
-	ab0 = stochastic_sample(texture_albedos, texture_normals, UV, indices.x, nr0);
-	ab1 = stochastic_sample(texture_albedos, texture_normals, UV, indices.y, nr1);
-	ab2 = stochastic_sample(texture_albedos, texture_normals, UV, indices.z, nr2);
-	ab3 = stochastic_sample(texture_albedos, texture_normals, UV, indices.w, nr3);
+	vec3 view_dir = normalize(normalize(-VERTEX)*mat3(TANGENT,-BINORMAL,NORMAL));
 	
-//	ab0 = texture(texture_albedos, vec3(UV, indices.x));
-//	ab1 = texture(texture_albedos, vec3(UV, indices.y));
-//	ab2 = texture(texture_albedos, vec3(UV, indices.z));
-//	ab3 = texture(texture_albedos, vec3(UV, indices.w));
-//
-//	nr0 = texture(texture_normals, vec3(UV, indices.x));
-//	nr1 = texture(texture_normals, vec3(UV, indices.y));
-//	nr2 = texture(texture_normals, vec3(UV, indices.z));
-//	nr3 = texture(texture_normals, vec3(UV, indices.w));
+	ab0 = stochastic_sample(texture_albedos, texture_normals, UV, indices.x, nr0, view_dir);
+	ab1 = stochastic_sample(texture_albedos, texture_normals, UV, indices.y, nr1, view_dir);
+	ab2 = stochastic_sample(texture_albedos, texture_normals, UV, indices.z, nr2, view_dir);
+	ab3 = stochastic_sample(texture_albedos, texture_normals, UV, indices.w, nr3, view_dir);
 	
 	vec4 w = get_depth_blended_weights(weights, vec4(ab0.a, ab1.a, ab2.a, ab3.a));
 	float w_sum = (w.r + w.g + w.b + w.a);
 	
-	vec3 normal = vec3(0.5,0.5,1.0);
+	vec4 normal = vec4(0.5,0.5,1.0,1.0);
 	vec3 color = vec3(1.0);
 	
-	if (use_grid){
-		color = texture(terrain_grid, UV*2.0).rgb;
+	if (terrain_use_grid){
+		color = texture(terrain_grid, UV*terrain_grid_scale).rgb;
 	} else {
 		color = (
 			w.r * ab0.rgb +
@@ -240,13 +250,14 @@ void fragment() {
 			w.b * ab2.rgb +
 			w.a * ab3.rgb) / w_sum;
 		normal = (
-			w.r * nr0.rgb +
-			w.g * nr1.rgb +
-			w.b * nr2.rgb +
-			w.a * nr3.rgb) / w_sum;
+			w.r * nr0 +
+			w.g * nr1 +
+			w.b * nr2 +
+			w.a * nr3) / w_sum;
 	}
 
 	ALBEDO = color;
-	vec3 blended_normals = blend_normals(texture(terrain_normalmap, UV2).rgb, normal);
+	ROUGHNESS = normal.a;
+	vec3 blended_normals = blend_normals(texture(terrain_normalmap, UV2).rgb, normal.xyz);
 	NORMAL = mat3(VIEW_MATRIX) * normalize(unpack_normal(vec4(blended_normals, 1.0)));;
 }

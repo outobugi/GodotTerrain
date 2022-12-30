@@ -45,7 +45,7 @@ func attach_terrain_material(material: TerrainMaterial3D):
 			
 		await RenderingServer.frame_post_draw
 			
-		material.set_normalmap(viewport_normalmap.get_texture())
+		material.set_normalmap(viewport_normalmap.get_texture(), true)
 	
 func update_resolution(size: int, height: int):
 	canvas_normalmap.get_material().set_shader_parameter("height", float(height))

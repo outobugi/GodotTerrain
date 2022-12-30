@@ -28,11 +28,18 @@ const TEXTURE_NORMALMAP: int = 1
 		advanced = val
 		notify_property_list_changed()
 
-var grid_texture_enabled: bool = true
-var grid_texture_scale: float = 2.0
+var grid_texture_enabled: bool = false :
+	set = enable_grid
+var grid_texture_scale: float = 2.0 :
+	set = set_grid_scale
 
 var resolution_height: int = 64
 var resolution_size: int = 1024
+
+var parallax_enabled: bool = true :
+	set = enable_parallax
+var parallax_depth: float = 1.0 :
+	set = set_parallax_depth
 
 var map_heightmap: ImageTexture
 var map_normalmap: Texture2D
@@ -62,7 +69,22 @@ func _get_shader_rid():
 	
 func enable_grid(enable: bool):
 	grid_texture_enabled = enable
-	RenderingServer.material_set_param(get_rid(), "use_grid", grid_texture_enabled)
+	RenderingServer.material_set_param(get_rid(), "terrain_use_grid", grid_texture_enabled)
+	emit_changed()
+	
+func set_grid_scale(scale: float):
+	grid_texture_scale = scale
+	RenderingServer.material_set_param(get_rid(), "terrain_grid_scale", grid_texture_scale)
+	emit_changed()
+	
+func enable_parallax(enable: bool):
+	parallax_enabled = enable
+	RenderingServer.material_set_param(get_rid(), "parallax_enabled", parallax_enabled)
+	emit_changed()
+	
+func set_parallax_depth(depth: float):
+	parallax_depth = depth
+	RenderingServer.material_set_param(get_rid(), "parallax_depth", parallax_depth)
 	emit_changed()
 	
 func set_size(size: int):
@@ -128,7 +150,8 @@ func get_normalmap() -> Texture2D:
 	return map_normalmap
 	
 func _apply_editor_normalmap():
-	map_normalmap.set_image(_editor_map_normalmap.get_image())
+	if _editor_map_normalmap:
+		map_normalmap.set_image(_editor_map_normalmap.get_image())
 	
 func _update_normalmap():
 	
@@ -275,6 +298,22 @@ func _get_property_list():
 			"name": "resolution_size",
 			"type": TYPE_INT,
 			"usage": PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY,
+		},
+		{
+			"name": "Parallax Mapping",
+			"type": TYPE_NIL,
+			"hint_string": "parallax_",
+			"usage": PROPERTY_USAGE_GROUP,
+		},
+		{
+			"name": "parallax_enabled",
+			"type": TYPE_BOOL,
+			"usage": PROPERTY_USAGE_DEFAULT,
+		},
+		{
+			"name": "parallax_depth",
+			"type": TYPE_FLOAT,
+			"usage": PROPERTY_USAGE_DEFAULT,
 		},
 		{
 			"name": "Maps",
