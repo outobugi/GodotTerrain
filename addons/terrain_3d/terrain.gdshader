@@ -54,18 +54,13 @@ vec2 hash(vec2 s){
 
 vec3 blend_normals(vec3 base, vec3 detail){
 	// https://blog.selfshadow.com/publications/blending-in-detail/
+	if (length(detail.xy) == 1.0){
+		return base;
+	}
 	vec3 n1 = base*2.0 - vec3(1.0);
 	vec3 n2 = detail*2.0 - vec3(1.0);
-	float a = 1.0/(1.0 + n1.z);
-	float b = -n1.x*n1.y*a;
-	vec3 b1 = vec3(1.0 - n1.x*n1.x*a, b, -n1.x);
-	vec3 b2 = vec3(b, 1.0 - n1.y*n1.y*a, -n1.y);
-	vec3 b3 = n1;
-	if (n1.z < -0.9999999){
-		b1 = vec3( 0, -1, 0);
-		b2 = vec3(-1,  0, 0);
-	}
-	vec3 r = n2.x*b1 + n2.y*b2 + n2.z*b3;
+	vec2 pd = n1.xy/n1.z + n2.xy/n2.z; // Add the PDs
+	vec3 r  = normalize(vec3(pd, 1));
 	return r*0.5 + 0.5;
 }
 
