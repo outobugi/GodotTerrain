@@ -72,7 +72,7 @@ func _make_visible(visible: bool):
 
 func _apply_changes():
 	if is_terrain_valid():
-		current_terrain.get_material().apply_editor_normalmap()
+		current_terrain.get_material()._apply_editor_normalmap()
 	
 func _forward_3d_gui_input(camera: Camera3D, event: InputEvent):
 	
@@ -185,10 +185,10 @@ func paint_height(uv: Vector2):
 			if is_in_bounds(pixel_position, heightmap_size):
 				var alpha: float = brush_shape.get_pixelv(brush_pixel).r * brush_opacity
 				var color: Color = heightmap_img.get_pixelv(pixel_position).lerp(Color.WHITE * brush_height, alpha)
-			
 				heightmap_img.set_pixelv(pixel_position, color)
-
+	
 	heightmap.set_image(heightmap_img)
+	gpu_painter.refresh_normalmap()
 	
 func paint_splat(uv: Vector2):
 	
@@ -202,7 +202,7 @@ func paint_splat(uv: Vector2):
 	
 	var rand_rotation = PI * randf()
 
-	for i in TerrainMaterial.SPLATMAP_MAX:
+	for i in TerrainMaterial3D.SPLATMAP_MAX:
 		
 		var splatmap_img: Image = current_terrain.get_material().get_splatmap(i).get_image()
 		var splatmap_size: Vector2i = splatmap_img.get_size()

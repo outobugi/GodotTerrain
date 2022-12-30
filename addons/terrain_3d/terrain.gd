@@ -6,13 +6,14 @@ extends Node3D
 ## Terrain3D creates a grid of MeshInstance3D's with varying LOD meshes.
 ##
 ## Similar to GridMap, it handles the rendering and collision internally.
-## It uses [HeightMapShape3D] for collision and a special [TerrainMaterial] for rendering.
+## It uses [HeightMapShape3D] for collision and a special [TerrainMaterial3D] for rendering.
 ## Supports terrains up to 64km2 in size.[br]
 ## [br]
-## [b]Note:[/b] It is recommended to save the [TerrainMaterial] to disk as a binary resource (.res or .material) for faster load times.
+## [b]Note:[/b] It is recommended to save the [TerrainMaterial3D] to disk as a binary resource (.res or .material) for faster load times.
 
 ## Emitted when size or height changes.
 signal resolution_changed()
+## Emitted when material changes.
 signal material_changed()
 
 const _SURFACE_SHADER: Shader = preload("res://addons/terrain_3d/terrain.gdshader")
@@ -43,7 +44,7 @@ var _update_pending: bool = false
 	
 @export_group("Material", "surface_")
 
-@export var surface_material: TerrainMaterial :
+@export var surface_material: TerrainMaterial3D :
 	set = set_material
 
 @export_subgroup("Particles", "particle_")
@@ -54,6 +55,7 @@ var _update_pending: bool = false
 @export var particle_density: int = 4 :
 	set = set_particle_density
 
+var particle_emitters: Array[GPUParticles3D]
 var particle_process_material: ShaderMaterial # Unused for now because particle shader doesn't support per instance uniforms
 var particle_mesh_array: Array[Array]
 var particle_mask_texture: Texture2D
@@ -63,12 +65,10 @@ var particle_mask_texture: Texture2D
 @export_flags_3d_physics var collision_layer: int = 0
 @export_flags_3d_physics var collision_mask: int = 0
 
-var particle_emitters: Array[GPUParticles3D]
-var lod_meshes: Array
-var chunks: Array
-var camera: Camera3D
 var physics_body: StaticBody3D
-
+var meshes: Array[ChunkMesh]
+var chunks: Array[ChunkInstance3D]
+var camera: Camera3D
 
 func _init():
 	set_notify_transform(true)
@@ -102,7 +102,7 @@ func _process(delta):
 				
 				if new_lod_level != old_lod_level:
 					chunk.set_current_lod_level(new_lod_level)
-					chunk.mesh = lod_meshes[new_lod_level]
+					chunk.mesh = meshes[new_lod_level]
 					
 		for emitter in particle_emitters:
 			emitter.global_transform.origin = camera_position
@@ -172,26 +172,26 @@ func set_particle_mesh(mesh: Mesh, layer: int, index: int):
 func get_particle_meshes():
 	return particle_mesh_array
 	
-## Sets the [TerrainMaterial] to all LOD meshes.
-func set_material(material: TerrainMaterial):
+## Sets the [TerrainMaterial3D] to all LOD meshes.
+func set_material(material: TerrainMaterial3D):
 	surface_material = material
 	surface_material.call_deferred("set_height", height)
 	surface_material.call_deferred("set_size", size)
 	
 	call_deferred("emit_signal", "material_changed")
 	
-	for mesh in lod_meshes:
+	for mesh in meshes:
 		mesh.surface_set_material(0, surface_material)
 	
-## Returns the assigned [TerrainMaterial]
-func get_material() -> TerrainMaterial:
+## Returns the assigned [TerrainMaterial3D]
+func get_material() -> TerrainMaterial3D:
 	return surface_material
 	
-## Check if the terrain has [TerrainMaterial]
+## Check if the terrain has [TerrainMaterial3D]
 func has_material() -> bool:
 	return surface_material != null
 	
-## Passes terrain properties to the [TerrainMaterial]
+## Passes terrain properties to the [TerrainMaterial3D]
 func update_material():
 	if surface_material:
 		surface_material.set_resolution(size, height)
@@ -270,7 +270,7 @@ func update():
 	clear()
 	update_lod()
 	
-	if lod_meshes.is_empty():
+	if meshes.is_empty():
 		print("Terrain failed. No meshes were created.")
 		return
 
@@ -284,9 +284,9 @@ func update():
 	
 	for x in side:
 		for z in side:
-			var chunk: Chunk = Chunk.new()
+			var chunk: ChunkInstance3D = ChunkInstance3D.new()
 			add_child(chunk)
-			chunk.set_mesh(lod_meshes[0]) 
+			chunk.set_mesh(meshes[0]) 
 			var pos = Vector3(x - (side / 2), 0, z - (side / 2)) * lod_size + offset
 			chunk.call_deferred("set_position", pos)
 			chunks.push_back(chunk)
@@ -362,16 +362,16 @@ func update_lod():
 	if !lod_count:
 		return 
 		
-	lod_meshes.resize(lod_count)
+	meshes.resize(lod_count)
 	var previous_subdivision: int = 1
 	
 	var subdivision = (lod_size / previous_subdivision)
 	
 	for i in lod_count:
 		
-		var mesh = GridMesh.new(subdivision, lod_size)
+		var mesh = ChunkMesh.new(subdivision, lod_size)
 		mesh.surface_set_material(0, surface_material)
-		lod_meshes[i] = mesh
+		meshes[i] = mesh
 		
 		previous_subdivision *= 2
 		subdivision = (lod_size / previous_subdivision)
@@ -397,7 +397,7 @@ func _get_property_list():
 	]
 	return property_list
 
-class Chunk extends MeshInstance3D:
+class ChunkInstance3D extends MeshInstance3D:
 	
 	var lod_level: int = -1
 	
@@ -407,7 +407,7 @@ class Chunk extends MeshInstance3D:
 	func get_current_lod_level():
 		return lod_level
 
-class GridMesh extends ArrayMesh:
+class ChunkMesh extends ArrayMesh:
 	
 	# Do not look here. It's ugly.
 	# Source for the mesh generation: https://catlikecoding.com/unity/tutorials/rounded-cube/

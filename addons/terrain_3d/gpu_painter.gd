@@ -25,11 +25,11 @@ func _ready():
 	
 func setup_viewport(viewport: SubViewport):
 	viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
-	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	viewport.world_2d = World2D.new()
 	viewport.disable_3d = true
 	
-func attach_terrain_material(material: TerrainMaterial):
+func attach_terrain_material(material: TerrainMaterial3D):
 	
 	if material:
 		var heightmap = material.get_heightmap()
@@ -41,6 +41,8 @@ func attach_terrain_material(material: TerrainMaterial):
 		if viewport_normalmap.size != _size:
 			viewport_normalmap.size = _size
 			
+		refresh_normalmap()
+			
 		await RenderingServer.frame_post_draw
 			
 		material.set_normalmap(viewport_normalmap.get_texture())
@@ -48,6 +50,10 @@ func attach_terrain_material(material: TerrainMaterial):
 func update_resolution(size: int, height: int):
 	canvas_normalmap.get_material().set_shader_parameter("height", float(height))
 	viewport_normalmap.size = Vector2i(size, size)
+	refresh_normalmap()
 
 func clear():
 	canvas_normalmap.set_texture(null)
+	
+func refresh_normalmap():
+	viewport_normalmap.render_target_update_mode = SubViewport.UPDATE_ONCE

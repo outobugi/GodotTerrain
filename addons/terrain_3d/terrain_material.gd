@@ -1,50 +1,61 @@
 @tool
 extends Material
-class_name TerrainMaterial
+class_name TerrainMaterial3D
 @icon("res://addons/terrain_3d/icons/icon_terrain_material.svg")
+
+# Maybe generate the shader code somwhere here?
+
+## Material used to render [Terrain3D].
+##
+## This material is not meant to be edited directly. All needed maps are created automatically.
 
 const _SHADER: Shader = preload("res://addons/terrain_3d/terrain.gdshader")
 const _DEFAULT_GRID_TEXTURE: Texture2D = preload("res://addons/terrain_3d/temp/grid_albedo.png")
 const _NORMALMAP_SHADER: Shader = preload("res://addons/terrain_3d/height_to_normal.gdshader")
 
+var _editor_map_normalmap: ViewportTexture
+var _editor_map_heightmap: ViewportTexture
+
 const SPLATMAPS: PackedStringArray = ["terrain_splatmap_01","terrain_splatmap_02","terrain_splatmap_03","terrain_splatmap_04"]
 const SPLATMAP_SIZE: int = 1024
 const SPLATMAP_MAX: int = 4
+const TEXTURE_ALBEDO: int = 0
+const TEXTURE_NORMALMAP: int = 1
 
-@export var show_data: bool = false :
-	set(show):
-		show_data = show
+## Enables inspecting all of the data used in the material.
+@export var advanced: bool = false :
+	set(val):
+		advanced = val
 		notify_property_list_changed()
 
-var grid_texture_enabled: bool
+var grid_texture_enabled: bool = true
 var grid_texture_scale: float = 2.0
 
-var resolution_height: float = 64.0
-var resolution_size: float = 1024.0
+var resolution_height: int = 64
+var resolution_size: int = 1024
 
-var map_heightmap: Texture2D
-var map_normalmap: Texture2D
-var map_splatmap_1: Texture2D
-var map_splatmap_2: Texture2D
-var map_splatmap_3: Texture2D
-var map_splatmap_4: Texture2D
+var map_heightmap: ImageTexture
+var map_normalmap: ImageTexture
+var map_splatmap_1: ImageTexture
+var map_splatmap_2: ImageTexture
+var map_splatmap_3: ImageTexture
+var map_splatmap_4: ImageTexture
 
-var editor_map_normalmap: ViewportTexture
-var editor_map_heightmap: ViewportTexture
-
+## Array of arrays of textures. Contains albedos and normals.
 var texture_arrays: Array[Array]
 
+## [Texture2DArray] created from [i]texture_arrays[/i].
 var texture_albedo: Texture2DArray
+## [Texture2DArray] created from [i]texture_arrays[/i].
 var texture_normal: Texture2DArray
 
 func _init():
 	RenderingServer.material_set_shader(get_rid(), _SHADER.get_rid())
 	RenderingServer.shader_set_default_texture_parameter(_SHADER.get_rid(), "terrain_grid", _DEFAULT_GRID_TEXTURE.get_rid())
-	
 	call_deferred("_update")
 	
 func _get_shader_mode():
-	return _SHADER.get_mode()
+	return Shader.MODE_SPATIAL
 
 func _get_shader_rid():
 	return _SHADER.get_rid()
@@ -67,7 +78,7 @@ func set_height(height: int):
 	RenderingServer.material_set_param(get_rid(), "terrain_height", float(height))
 	emit_changed()
 	
-func get_height():
+func get_height() -> int:
 	return resolution_height
 	
 func set_resolution(size: int, height: int):
@@ -81,17 +92,17 @@ func set_resolution(size: int, height: int):
 	
 func set_heightmap(map: Texture2D, temp: bool = false):
 	if temp:
-		editor_map_heightmap = map
+		_editor_map_heightmap = map
 	else:
 		map_heightmap = map
 	_update_heightmap()
 	emit_changed()
 	
-func get_heightmap():
+func get_heightmap() -> ImageTexture:
 	return map_heightmap
 	
-func apply_editor_heightmap():
-	map_heightmap.set_image(editor_map_heightmap.get_image())
+func _apply_editor_heightmap():
+	map_heightmap.set_image(_editor_map_heightmap.get_image())
 	
 func _update_heightmap():
 	var map_size: int = (resolution_size)+1
@@ -107,17 +118,17 @@ func _update_heightmap():
 	
 func set_normalmap(map: Texture2D, temp: bool = false):
 	if temp:
-		editor_map_normalmap = map
+		_editor_map_normalmap = map
 	else:
 		map_normalmap = map
 	_update_normalmap()
 	emit_changed()
 	
-func get_normalmap():
+func get_normalmap() -> ImageTexture:
 	return map_normalmap
 	
-func apply_editor_normalmap():
-	map_normalmap.set_image(editor_map_normalmap.get_image())
+func _apply_editor_normalmap():
+	map_normalmap.set_image(_editor_map_normalmap.get_image())
 	
 func _update_normalmap():
 	
@@ -130,9 +141,9 @@ func _update_normalmap():
 		
 	var use_editor_normalmap: bool = false
 	var map: Variant = null
-	if editor_map_normalmap:
-		if !editor_map_normalmap.get_image().is_empty():
-			map = editor_map_normalmap.get_rid()
+	if _editor_map_normalmap:
+		if !_editor_map_normalmap.get_image().is_empty():
+			map = _editor_map_normalmap.get_rid()
 			use_editor_normalmap = true
 	
 	if !use_editor_normalmap:
@@ -150,7 +161,7 @@ func set_splatmap(index: int, map: Texture2D):
 	RenderingServer.material_set_param(get_rid(), SPLATMAPS[index], map.get_rid())
 	emit_changed()
 	
-func get_splatmap(index: int):
+func get_splatmap(index: int) -> ImageTexture:
 	match index:
 		0: return map_splatmap_1
 		1: return map_splatmap_2
@@ -171,21 +182,21 @@ func _update_splatmaps():
 			splatmap.set_image(img)
 		set_splatmap(map, splatmap)
 		
-func get_textures():
+func get_textures() -> Array[Array]:
 	return texture_arrays
 			
 func set_texture(texture: Texture2D, index: int, is_albedo: bool):
 	if is_albedo:
-		if index < texture_arrays[0].size():
+		if index < texture_arrays[TEXTURE_ALBEDO].size():
 			if texture == null:
-				texture_arrays[0].remove_at(index)
+				texture_arrays[TEXTURE_ALBEDO].remove_at(index)
 			else:
-				texture_arrays[0][index] = texture
+				texture_arrays[TEXTURE_ALBEDO][index] = texture
 		else:
-			texture_arrays[0].append(texture)
-	texture_arrays[1].resize(texture_arrays[0].size())
+			texture_arrays[TEXTURE_ALBEDO].append(texture)
+	texture_arrays[TEXTURE_NORMALMAP].resize(texture_arrays[TEXTURE_ALBEDO].size())
 	if !is_albedo:
-		texture_arrays[1][index] = texture
+		texture_arrays[TEXTURE_NORMALMAP][index] = texture
 	_update_textures()
 	emit_changed()
 
@@ -230,7 +241,7 @@ func _convert_array(arr: Array) -> Texture2DArray:
 
 func _get_property_list():
 	
-	var property_usage: int = PROPERTY_USAGE_DEFAULT if show_data else PROPERTY_USAGE_STORAGE
+	var property_usage: int = PROPERTY_USAGE_DEFAULT if advanced else PROPERTY_USAGE_STORAGE
 	
 	var property_list: Array = [
 		{
@@ -275,42 +286,42 @@ func _get_property_list():
 			"name": "map_heightmap",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
-			"hint_string": "Texture2D",
+			"hint_string": "ImageTexture",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{
 			"name": "map_normalmap",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
-			"hint_string": "Texture2D",
+			"hint_string": "ImageTexture",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{
 			"name": "map_splatmap_1",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
-			"hint_string": "Texture2D",
+			"hint_string": "ImageTexture",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{
 			"name": "map_splatmap_2",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
-			"hint_string": "Texture2D",
+			"hint_string": "ImageTexture",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{
 			"name": "map_splatmap_3",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
-			"hint_string": "Texture2D",
+			"hint_string": "ImageTexture",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{
 			"name": "map_splatmap_4",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
-			"hint_string": "Texture2D",
+			"hint_string": "ImageTexture",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{
