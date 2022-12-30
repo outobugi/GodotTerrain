@@ -6,7 +6,7 @@ uniform float terrain_size = 1024.0;
 
 uniform sampler2D terrain_heightmap : filter_linear_mipmap, repeat_disable;
 uniform sampler2D terrain_normalmap : filter_linear_mipmap, repeat_disable;
-uniform sampler2D terrain_globalmap : filter_linear_mipmap, repeat_disable;
+uniform sampler2D terrain_globalmap : filter_linear_mipmap, repeat_disable; // unsused
 
 uniform sampler2D terrain_splatmap_01 : filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D terrain_splatmap_02 : filter_linear_mipmap_anisotropic, repeat_disable;
@@ -31,11 +31,6 @@ vec4 pack_normal(vec3 n, float a) {
 	return vec4((n.xzy + vec3(1.0)) * 0.5, a);
 }
 
-vec3 get_terrain_normal(vec2 uv){
-	mat3 normal_basis = mat3(vec3(1,0,0),vec3(0,1,0),vec3(0,0,1));
-	return normal_basis * unpack_normal(texture(terrain_normalmap, uv));
-}
-
 void vertex(){
 	
 	vec3 world_vertex = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -47,24 +42,39 @@ void vertex(){
 	float height = (texture(terrain_heightmap, UV2).r);
 	VERTEX.y = (height * terrain_height) * (VERTEX.y + 1.0);
 
-	NORMAL = get_terrain_normal(UV2);
+	NORMAL = unpack_normal(texture(terrain_normalmap, UV2));
 	TANGENT = cross(NORMAL, vec3(0,0,1));
 	BINORMAL = cross(NORMAL, TANGENT);
 	
 }
 
-vec2 hash(vec2 s)
-{
+vec2 hash(vec2 s){
 	return fract(sin(mod(vec2(dot(s, vec2(127.1,311.7)), dot(s, vec2(269.5,183.3))), 3.14159))*43758.5453);
 }
 
-vec4 depth_blend(vec4 a_value,float a, vec4 b_value, float b, float t, float blend) {
-	// https://www.gamasutra.com
-	// /blogs/AndreyMishkinis/20130716/196339/Advanced_Terrain_Texture_Splatting.php
-	float ma = max(a + (1.0 - t), b + t) - blend;
-	float ba = max(a + (1.0 - t) - ma, 0.0);
-	float bb = max(b + t - ma, 0.0);
-	return (a_value * ba + b_value * bb) / (ba + bb);
+vec3 blend_normals(vec3 base, vec3 detail){
+	// https://blog.selfshadow.com/publications/blending-in-detail/
+	vec3 n1 = base*2.0 - vec3(1.0);
+	vec3 n2 = detail*2.0 - vec3(1.0);
+	float a = 1.0/(1.0 + n1.z);
+	float b = -n1.x*n1.y*a;
+	vec3 b1 = vec3(1.0 - n1.x*n1.x*a, b, -n1.x);
+	vec3 b2 = vec3(b, 1.0 - n1.y*n1.y*a, -n1.y);
+	vec3 b3 = n1;
+	if (n1.z < -0.9999999){
+		b1 = vec3( 0, -1, 0);
+		b2 = vec3(-1,  0, 0);
+	}
+	vec3 r = n2.x*b1 + n2.y*b2 + n2.z*b3;
+	return r*0.5 + 0.5;
+}
+
+vec4 depth_blend(vec4 color_a, vec4 color_b, float t, float blend) {
+	// https://www.gamasutra.com/blogs/AndreyMishkinis/20130716/196339/Advanced_Terrain_Texture_Splatting.php
+	float ma = max(color_a.a + (1.0 - t), color_b.a + t) - blend;
+	float ba = max(color_a.a + (1.0 - t) - ma, 0.0);
+	float bb = max(color_b.a + t - ma, 0.0);
+	return (color_a * ba + color_b * bb) / (ba + bb);
 }
 
 vec4 get_depth_blended_weights(vec4 splat, vec4 bumps) {
@@ -85,6 +95,22 @@ vec4 get_depth_blended_weights(vec4 splat, vec4 bumps) {
 	return clamp(d, 0, 1);
 }
 
+vec3 get_stochastic_blend_weights(vec3 weights, float a, float b, float c, float contrast){
+	// https://forum.unity.com/threads/procedural-stochastic-texturing-prototype.628522/
+	// compute weight with height map
+	float epsilon = 1.0 / 1024.0;
+	vec3 out_weights = vec3(weights.x * (a + epsilon),weights.y * (b + epsilon),weights.z * (c + epsilon));
+	// Contrast weights
+	float maxWeight = max(out_weights.x, max(out_weights.y, out_weights.z));
+	float transition = contrast * maxWeight;
+	float threshold = maxWeight - transition;
+	float scale = 1.0 / transition;
+	out_weights = clamp((out_weights - threshold) * scale, vec3(0), vec3(1));
+	// Normalize weights.
+	float weightScale = 1.0 / (out_weights.x + out_weights.y + out_weights.z);
+	out_weights *= weightScale;
+	return out_weights;
+}
 
 vec4 stochastic_sample(sampler2DArray albedo, sampler2DArray normal, vec2 uv, float index, out vec4 out_normal){
 	vec2 skewV = mat2(vec2(1.0,1.0),vec2(-0.57735027 , 1.15470054))*uv * 3.464;
@@ -103,14 +129,19 @@ vec4 stochastic_sample(sampler2DArray albedo, sampler2DArray normal, vec2 uv, fl
 	vec3 uv1 = vec3(uv+hash(bw_vx[0].xy), index);
 	vec3 uv2 = vec3(uv+hash(bw_vx[1].xy), index);
 	vec3 uv3 = vec3(uv+hash(bw_vx[2].xy), index);
-
-	vec4 col = (textureGrad(albedo,uv1 ,ddx,ddy)*bw_vx[3].x) +
-	(textureGrad(albedo,uv2,ddx,ddy)*bw_vx[3].y) +
-	(textureGrad(albedo,uv3,ddx,ddy)*bw_vx[3].z);
+	float blend = 0.2;
 	
-	out_normal = (textureGrad(normal,uv1 ,ddx,ddy)*bw_vx[3].x) +
-	(textureGrad(normal,uv2,ddx,ddy)*bw_vx[3].y) +
-	(textureGrad(normal,uv3,ddx,ddy)*bw_vx[3].z);
+	vec4 col1 = textureGrad(albedo,uv1,ddx,ddy);
+	vec4 col2 = textureGrad(albedo,uv2,ddx,ddy);
+	vec4 col3 = textureGrad(albedo,uv3,ddx,ddy);
+	
+	vec3 weights = get_stochastic_blend_weights(bw_vx[3].xyz, col1.a, col2.a, col3.a, 0.2);
+	
+	vec4 col = (col1*weights.x) + (col2*weights.y) + (col3*weights.z);
+	
+	out_normal = (textureGrad(normal,uv1 ,ddx,ddy)*weights.x) +
+	(textureGrad(normal,uv2,ddx,ddy)*weights.y) +
+	(textureGrad(normal,uv3,ddx,ddy)*weights.z);
 	
 	return col;
 }
@@ -202,17 +233,25 @@ void fragment() {
 	vec4 w = get_depth_blended_weights(weights, vec4(ab0.a, ab1.a, ab2.a, ab3.a));
 	float w_sum = (w.r + w.g + w.b + w.a);
 	
+	vec3 normal = vec3(0.5,0.5,1.0);
+	vec3 color = vec3(1.0);
+	
 	if (use_grid){
-		ALBEDO = texture(terrain_grid, UV*2.0).rgb;
+		color = texture(terrain_grid, UV*2.0).rgb;
 	} else {
-		ALBEDO = (
+		color = (
 			w.r * ab0.rgb +
 			w.g * ab1.rgb +
 			w.b * ab2.rgb +
 			w.a * ab3.rgb) / w_sum;
+		normal = (
+			w.r * nr0.rgb +
+			w.g * nr1.rgb +
+			w.b * nr2.rgb +
+			w.a * nr3.rgb) / w_sum;
 	}
-	
-	vec3 terrain_normal_world = get_terrain_normal(UV2);
 
-	NORMAL = mat3(VIEW_MATRIX) * normalize(terrain_normal_world);
+	ALBEDO = color;
+	vec3 blended_normals = blend_normals(texture(terrain_normalmap, UV2).rgb, normal);
+	NORMAL = mat3(VIEW_MATRIX) * normalize(unpack_normal(vec4(blended_normals, 1.0)));;
 }
