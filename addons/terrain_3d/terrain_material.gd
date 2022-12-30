@@ -35,7 +35,7 @@ var resolution_height: int = 64
 var resolution_size: int = 1024
 
 var map_heightmap: ImageTexture
-var map_normalmap: ImageTexture
+var map_normalmap: Texture2D
 var map_splatmap_1: ImageTexture
 var map_splatmap_2: ImageTexture
 var map_splatmap_3: ImageTexture
@@ -124,7 +124,7 @@ func set_normalmap(map: Texture2D, temp: bool = false):
 	_update_normalmap()
 	emit_changed()
 	
-func get_normalmap() -> ImageTexture:
+func get_normalmap() -> Texture2D:
 	return map_normalmap
 	
 func _apply_editor_normalmap():
@@ -293,7 +293,7 @@ func _get_property_list():
 			"name": "map_normalmap",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
-			"hint_string": "ImageTexture",
+			"hint_string": "Texture2D",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{
