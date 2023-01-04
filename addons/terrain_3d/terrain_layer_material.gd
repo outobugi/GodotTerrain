@@ -118,7 +118,7 @@ func _get_shader_rid():
 func _update_shader():
 
 	var code: String = "shader_type spatial;\n"
-	code += "uniform vec4 albedo_color : source_color;\n"
+	code += "uniform vec4 albedo_color = vec4(1.0);\n"
 	code += "uniform sampler2D albedo_texture : source_color,filter_linear_mipmap_anisotropic,repeat_enable;\n"
 	code += "uniform sampler2D normal_texture : hint_normal,filter_linear_mipmap_anisotropic,repeat_enable;\n"
 	code += "uniform float normal_scale : hint_range(-16.0, 16.0, 0.1);\n"
@@ -174,13 +174,13 @@ func _get_property_list():
 			"hint_string": "Texture2D",
 			"usage": PROPERTY_USAGE_DEFAULT,
 		},
-		{
-			"name": "normal_scale",
-			"type": TYPE_FLOAT,
-			"hint": PROPERTY_HINT_RANGE,
-			"hint_string": "-16, 16",
-			"usage": PROPERTY_USAGE_DEFAULT,
-		},
+#		{
+#			"name": "normal_scale",
+#			"type": TYPE_FLOAT,
+#			"hint": PROPERTY_HINT_RANGE,
+#			"hint_string": "-16, 16",
+#			"usage": PROPERTY_USAGE_DEFAULT,
+#		},
 		{
 			"name": "ORM",
 			"type": TYPE_NIL,
@@ -205,11 +205,11 @@ func _get_property_list():
 			"type": TYPE_VECTOR3,
 			"usage": PROPERTY_USAGE_DEFAULT,
 		},
-		{
-			"name": "uv_anti_tile",
-			"type": TYPE_BOOL,
-			"usage": PROPERTY_USAGE_DEFAULT,
-		},
+#		{
+#			"name": "uv_anti_tile",
+#			"type": TYPE_BOOL,
+#			"usage": PROPERTY_USAGE_DEFAULT,
+#		},
 	]
 	return property_list
 	

@@ -57,7 +57,6 @@ func _edit(object: Variant):
 		current_terrain = object
 	
 func _clear():
-	
 	if is_terrain_valid():
 		if current_terrain.is_connected("material_changed", _terrain_on_material_changed):
 			current_terrain.disconnect("material_changed", _terrain_on_material_changed)
@@ -66,10 +65,6 @@ func _clear():
 	current_terrain = null
 	
 func _make_visible(visible: bool):
-	
-	if !visible and is_active:
-		gpu_painter.clear()
-		
 	is_active = visible
 	toolbar.visible = visible
 
@@ -207,8 +202,8 @@ func paint_splat(uv: Vector2):
 	var brush_shape = toolbar.get_brush_shape()
 	var brush_shape_size = brush_shape.get_size()
 	
-	var brush_color = color_channels[wrapi(toolbar.get_material_layer(), 1, 5) - 1]
-	var splat_index = (toolbar.get_material_layer() - 1) / 4
+	var brush_color = color_channels[wrapi(toolbar.get_material_layer(), 0, 4)]
+	var splat_index = (toolbar.get_material_layer()) / 4
 	
 	var rand_rotation = PI * randf()
 

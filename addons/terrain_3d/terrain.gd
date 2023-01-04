@@ -26,16 +26,16 @@ var _update_pending: bool = false
 
 @export_enum("512:512", "1024:1024", "2048:2048", "4096:4096", "8192:8192") var size: int = 1024 :
 	set = set_size
-@export var height: int = 64 :
+@export_range(1,256) var height: int = 64 :
 	set = set_height
 
 @export_group("LOD", "lod_")
 
-@export var lod_count: int = 4 :
+@export_range(1,16) var lod_count: int = 5 :
 	set = set_lod_count
-@export_enum("32:32", "64:64", "128:128", "256:256") var lod_size: int = 64 :
+@export_enum("32:32", "64:64", "128:128", "256:256") var lod_size: int = 32 :
 	set = set_lod_size
-@export var lod_bias: float = 0.2 :
+@export_range(0.0,1.0) var lod_bias: float = 0.2 :
 	set = set_lod_bias
 
 @export_group("Material", "surface_")
@@ -45,10 +45,10 @@ var _update_pending: bool = false
 
 @export_subgroup("Particles", "particle_")
 
-@export var particle_draw_distance: int = 64 :
+@export_range(0,512) var particle_draw_distance: int = 64 :
 	set = set_particle_draw_distance
 	
-@export var particle_density: int = 4 :
+@export_range(1,16) var particle_density: int = 4 :
 	set = set_particle_density
 
 var particle_emitters: Array[GPUParticles3D]
@@ -75,6 +75,11 @@ func _init():
 func _exit_tree():
 	clear()
 	set_process(false)
+	
+func _get_configuration_warnings():
+	if !has_material():
+		var string_arr: PackedStringArray = ["Terrain has no material. Painting disabled."]
+		return string_arr
 		
 func _process(delta):
 	if !camera:
@@ -166,10 +171,11 @@ func set_material(material: TerrainMaterial3D):
 	if surface_material:
 		surface_material.call_deferred("set_height", height)
 		surface_material.call_deferred("set_size", size)
-	
+		
 	call_deferred("emit_signal", "material_changed")
-	
 	mesh.surface_set_material(0, surface_material)
+	
+	update_configuration_warnings()
 	
 ## Returns the assigned [TerrainMaterial3D]
 func get_material() -> TerrainMaterial3D:
