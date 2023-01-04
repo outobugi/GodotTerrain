@@ -11,16 +11,14 @@ class_name TerrainMaterial3D
 
 const _SHADER: Shader = preload("res://addons/terrain_3d/terrain.gdshader")
 const _DEFAULT_GRID_TEXTURE: Texture2D = preload("res://addons/terrain_3d/temp/grid_albedo.png")
-const _NORMALMAP_SHADER: Shader = preload("res://addons/terrain_3d/height_to_normal.gdshader")
 
 var _editor_map_normalmap: ViewportTexture
 var _editor_map_heightmap: ViewportTexture
 
+const LAYERS_MAX: int = 16
 const SPLATMAPS: PackedStringArray = ["terrain_splatmap_01","terrain_splatmap_02","terrain_splatmap_03","terrain_splatmap_04"]
 const SPLATMAP_SIZE: int = 1024
 const SPLATMAP_MAX: int = 4
-const TEXTURE_ALBEDO: int = 0
-const TEXTURE_NORMALMAP: int = 1
 
 ## Enables inspecting all of the data used in the material.
 @export var advanced: bool = false :
@@ -48,13 +46,12 @@ var map_splatmap_2: ImageTexture
 var map_splatmap_3: ImageTexture
 var map_splatmap_4: ImageTexture
 
-## Array of arrays of textures. Contains albedos and normals.
-var texture_arrays: Array[Array]
+## Array of materials.
+var material_layers: Array[TerrainLayerMaterial3D]
 
-## [Texture2DArray] created from [i]texture_arrays[/i].
-var texture_albedo: Texture2DArray
-## [Texture2DArray] created from [i]texture_arrays[/i].
-var texture_normal: Texture2DArray
+var texture_array_albedo: Texture2DArray
+var texture_array_normal: Texture2DArray
+var texture_array_orm: Texture2DArray
 
 func _init():
 	RenderingServer.material_set_shader(get_rid(), _SHADER.get_rid())
@@ -147,6 +144,8 @@ func set_normalmap(map: Texture2D, temp: bool = false):
 	emit_changed()
 	
 func get_normalmap() -> Texture2D:
+	if _editor_map_normalmap:
+		return _editor_map_normalmap
 	return map_normalmap
 	
 func _apply_editor_normalmap():
@@ -154,7 +153,6 @@ func _apply_editor_normalmap():
 		map_normalmap.set_image(_editor_map_normalmap.get_image())
 	
 func _update_normalmap():
-	
 	if !map_normalmap:
 		map_normalmap = ImageTexture.new()
 		var map_size: Vector2 = map_heightmap.get_size()
@@ -205,49 +203,83 @@ func _update_splatmaps():
 			splatmap.set_image(img)
 		set_splatmap(map, splatmap)
 		
-func get_textures() -> Array[Array]:
-	return texture_arrays
+func get_material_layers() -> Array[TerrainLayerMaterial3D]:
+	return material_layers
 			
-func set_texture(texture: Texture2D, index: int, is_albedo: bool):
-	if is_albedo:
-		if index < texture_arrays[TEXTURE_ALBEDO].size():
-			if texture == null:
-				texture_arrays[TEXTURE_ALBEDO].remove_at(index)
-			else:
-				texture_arrays[TEXTURE_ALBEDO][index] = texture
+func set_material_layer(material: TerrainLayerMaterial3D, layer: int):
+	if layer < material_layers.size():
+		if material == null:
+			var material_to_remove: TerrainLayerMaterial3D = material_layers[layer]
+			material_to_remove.disconnect("texture_changed", _update_textures)
+			material_to_remove.disconnect("value_changed", _update_values)
+			material_layers.remove_at(layer)
 		else:
-			texture_arrays[TEXTURE_ALBEDO].append(texture)
-	texture_arrays[TEXTURE_NORMALMAP].resize(texture_arrays[TEXTURE_ALBEDO].size())
-	if !is_albedo:
-		texture_arrays[TEXTURE_NORMALMAP][index] = texture
-	_update_textures()
+			material_layers[layer] = material
+	else:
+		material_layers.push_back(material)
+		
+	if material:
+		material.connect("texture_changed", _update_textures)
+		material.connect("value_changed", _update_values)
+	
+	_update_layers()
+
+func _update_values():
+	var uv_scales: PackedVector3Array
+	var colors: PackedColorArray
+	
+	for material in material_layers:
+		var uv: Vector3 = material.get_uv_scale()
+		var color: Color = material.get_albedo()
+		uv_scales.push_back(uv)
+		colors.push_back(color)
+		
+	RenderingServer.material_set_param(get_rid(), "texture_uv_scale_array", uv_scales)
+	RenderingServer.material_set_param(get_rid(), "texture_color_array", colors)
+	emit_changed()
+	
+func _update_textures():
+	var albedo_textures: Array[Texture2D]
+	var normal_textures: Array[Texture2D]
+	var orm_textures: Array[Texture2D]
+	
+	for material in material_layers:
+		var alb: Texture2D = material.get_texture(TerrainLayerMaterial3D.TextureParam.TEXTURE_ALBEDO)
+		var nor: Texture2D = material.get_texture(TerrainLayerMaterial3D.TextureParam.TEXTURE_NORMAL)
+		var orm: Texture2D = material.get_texture(TerrainLayerMaterial3D.TextureParam.TEXTURE_ORM)
+		albedo_textures.push_back(alb)
+		normal_textures.push_back(nor)
+		orm_textures.push_back(orm)
+		
+	texture_array_albedo = _convert_array(albedo_textures)
+	texture_array_normal = _convert_array(normal_textures)
+	texture_array_orm = _convert_array(orm_textures)
+	
+	RenderingServer.material_set_param(get_rid(), "texture_array_albedo", texture_array_albedo.get_rid())
+	RenderingServer.material_set_param(get_rid(), "texture_array_normal", texture_array_normal.get_rid())
+	RenderingServer.material_set_param(get_rid(), "texture_array_orm", texture_array_orm.get_rid())
+	
+	RenderingServer.material_set_param(get_rid(), "texture_array_normal_max", texture_array_normal.get_layers() - 1)
+	RenderingServer.material_set_param(get_rid(), "texture_array_orm_max", texture_array_orm.get_layers() - 1)
+	
+	enable_grid(texture_array_albedo.get_layers() == 0)
 	emit_changed()
 
-func _update_textures():
-	
-	if texture_arrays.is_empty():
-		# Resizing to 2 and filling with Array does not create 2 unique Arrays????
-		texture_arrays.append(Array())
-		texture_arrays.append(Array())
-	
-	texture_albedo = _convert_array(texture_arrays[0])
-	RenderingServer.material_set_param(get_rid(), "texture_albedos", texture_albedo.get_rid())
-	
-	texture_normal = _convert_array(texture_arrays[1])
-	RenderingServer.material_set_param(get_rid(), "texture_normals", texture_normal.get_rid())
-
-	enable_grid(texture_albedo.get_layers() == 0)
+func _update_layers():
+	_update_textures()
+	_update_values()
 	
 func _update():
 	_update_heightmap()
 	_update_normalmap()
 	_update_splatmaps()
-	_update_textures()
+	_update_layers()
 
 func _convert_array(arr: Array) -> Texture2DArray:
+	
 	var img_arr: Array[Image]
 	for tex in arr:
-		if tex != null and tex is Texture2D:
+		if tex != null:
 			var img: Image = tex.get_image()
 			
 			if img.is_compressed():
@@ -257,9 +289,11 @@ func _convert_array(arr: Array) -> Texture2DArray:
 			img.convert(Image.FORMAT_RGBA8)
 				
 			img_arr.push_back(img)
+			
 	var tex_arr = Texture2DArray.new()
 	if !img_arr.is_empty():
 		tex_arr.create_from_images(img_arr)
+		
 	return tex_arr
 
 func _get_property_list():
@@ -370,23 +404,27 @@ func _get_property_list():
 			"usage": PROPERTY_USAGE_GROUP,
 		},
 		{
-			"name": "texture_albedo",
+			"name": "texture_array_albedo",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
 			"hint_string": "Texture2DArray",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{
-			"name": "texture_normal",
+			"name": "texture_array_normal",
 			"type": TYPE_OBJECT,
 			"hint": PROPERTY_HINT_RESOURCE_TYPE,
 			"hint_string": "Texture2DArray",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
 		{
-			"name": "texture_arrays",
-			"type": TYPE_ARRAY,
+			"name": "texture_array_orm",
+			"type": TYPE_OBJECT,
+			"hint": PROPERTY_HINT_RESOURCE_TYPE,
+			"hint_string": "Texture2DArray",
 			"usage": property_usage | PROPERTY_USAGE_READ_ONLY,
 		},
+		
 	]
 	return property_list
+	

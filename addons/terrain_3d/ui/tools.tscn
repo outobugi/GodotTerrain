@@ -1,20 +1,10 @@
-[gd_scene load_steps=10 format=3 uid="uid://c5uv4atbb75k8"]
+[gd_scene load_steps=6 format=3 uid="uid://c5uv4atbb75k8"]
 
 [ext_resource type="Script" path="res://addons/terrain_3d/ui/tools.gd" id="1_6lpwp"]
 [ext_resource type="Texture2D" uid="uid://g84p30cseaq1" path="res://addons/terrain_3d/icons/icon_height_brush.svg" id="2_42756"]
 [ext_resource type="ButtonGroup" uid="uid://dmi8ebigmrcfy" path="res://addons/terrain_3d/ui/tool_group.tres" id="2_wfina"]
 [ext_resource type="Texture2D" uid="uid://ccji2p2kgqa0m" path="res://addons/terrain_3d/icons/icon_brush.svg" id="3_vhfbk"]
 [ext_resource type="Texture2D" uid="uid://ml6dwqda86im" path="res://addons/terrain_3d/icons/icon_multimesh.svg" id="5_11jqx"]
-[ext_resource type="Texture2D" uid="uid://g5qow6rig4b6" path="res://addons/terrain_3d/icons/icon_warning.svg" id="10_vfmlp"]
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_8ktgm"]
-bg_color = Color(0.6, 0.6, 0.6, 0.243137)
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_7nu5w"]
-bg_color = Color(0, 0, 0, 0.258824)
-
-[sub_resource type="LabelSettings" id="LabelSettings_5ucyf"]
-font_size = 11
 
 [node name="Tools" type="VBoxContainer"]
 custom_minimum_size = Vector2(228, 0)
@@ -25,20 +15,9 @@ offset_right = -20.096
 offset_bottom = -1.96002
 script = ExtResource("1_6lpwp")
 
-[node name="Label2" type="Label" parent="."]
-layout_mode = 2
-theme_override_styles/normal = SubResource("StyleBoxFlat_8ktgm")
-text = "Terrain Tools"
-horizontal_alignment = 1
-vertical_alignment = 1
-
 [node name="Buttons" type="HBoxContainer" parent="."]
 layout_mode = 2
-
-[node name="Label" type="Label" parent="Buttons"]
-custom_minimum_size = Vector2(64, 0)
-layout_mode = 2
-text = "Brush"
+alignment = 1
 
 [node name="ToolHeight" type="Button" parent="Buttons"]
 layout_mode = 2
@@ -74,12 +53,8 @@ icon = ExtResource("5_11jqx")
 flat = true
 icon_alignment = 1
 
-[node name="Label" type="Label" parent="."]
+[node name="HSeparator" type="HSeparator" parent="."]
 layout_mode = 2
-theme_override_styles/normal = SubResource("StyleBoxFlat_8ktgm")
-text = "Brush Settings"
-horizontal_alignment = 1
-vertical_alignment = 1
 
 [node name="BrushSize" type="HBoxContainer" parent="."]
 layout_mode = 2
@@ -165,61 +140,52 @@ text = "1"
 horizontal_alignment = 1
 clip_text = true
 
-[node name="TextureLayers" type="VBoxContainer" parent="."]
+[node name="MaterialLayers" type="PanelContainer" parent="."]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="Label" type="Label" parent="TextureLayers"]
+[node name="VBox" type="VBoxContainer" parent="MaterialLayers"]
 layout_mode = 2
-theme_override_styles/normal = SubResource("StyleBoxFlat_8ktgm")
-text = "Textures"
+size_flags_vertical = 3
+theme_override_constants/separation = 0
+
+[node name="Label" type="Label" parent="MaterialLayers/VBox"]
+layout_mode = 2
+theme_override_constants/line_spacing = 0
+text = "Layers"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="LayerError" type="PanelContainer" parent="TextureLayers"]
-layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_7nu5w")
-
-[node name="HBoxContainer" type="HBoxContainer" parent="TextureLayers/LayerError"]
-layout_mode = 2
-alignment = 1
-
-[node name="TextureRect" type="TextureRect" parent="TextureLayers/LayerError/HBoxContainer"]
-layout_mode = 2
-texture = ExtResource("10_vfmlp")
-stretch_mode = 5
-
-[node name="Label" type="Label" parent="TextureLayers/LayerError/HBoxContainer"]
-layout_mode = 2
-text = "Normalmap Missing!"
-label_settings = SubResource("LabelSettings_5ucyf")
-vertical_alignment = 1
-
-[node name="LayersContainer" type="ScrollContainer" parent="TextureLayers"]
+[node name="Container" type="ScrollContainer" parent="MaterialLayers/VBox"]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="Layers" type="VBoxContainer" parent="TextureLayers/LayersContainer"]
+[node name="Layers" type="VBoxContainer" parent="MaterialLayers/VBox/Container"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="MeshLayers" type="VBoxContainer" parent="."]
+[node name="MeshLayers" type="PanelContainer" parent="."]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="Label" type="Label" parent="MeshLayers"]
+[node name="VBox" type="VBoxContainer" parent="MeshLayers"]
 layout_mode = 2
-theme_override_styles/normal = SubResource("StyleBoxFlat_8ktgm")
+size_flags_vertical = 3
+theme_override_constants/separation = 0
+
+[node name="Label" type="Label" parent="MeshLayers/VBox"]
+layout_mode = 2
+theme_override_constants/line_spacing = 0
 text = "Particles"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="LayersContainer" type="ScrollContainer" parent="MeshLayers"]
+[node name="Container" type="ScrollContainer" parent="MeshLayers/VBox"]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="Layers" type="VBoxContainer" parent="MeshLayers/LayersContainer"]
+[node name="Layers" type="VBoxContainer" parent="MeshLayers/VBox/Container"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3

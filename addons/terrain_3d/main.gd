@@ -22,13 +22,12 @@ var color_channels: Array[Color] = [
 func _enter_tree():
 	toolbar = TOOLBAR_UI.instantiate()
 	toolbar.hide()
-	toolbar.accent_color = get_editor_interface().get_editor_settings().get_setting("interface/theme/accent_color")
-	toolbar.call_deferred("init_tools")
+	toolbar.editor_interface = get_editor_interface()
+	toolbar.call_deferred("init_toolbar")
 	add_control_to_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_SIDE_RIGHT, toolbar)
-	
 	gpu_painter = GPUPainter.new()
 	add_child(gpu_painter)
-	
+
 func _exit_tree():
 	remove_control_from_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_SIDE_RIGHT, toolbar)
 	toolbar.queue_free()
@@ -41,8 +40,12 @@ func _handles(object: Variant):
 	
 func _edit(object: Variant):
 	if object is Terrain3D:
-		call_deferred("load_textures")
-		call_deferred("load_meshes")
+		
+		if object == current_terrain:
+			return
+		
+		load_material_layers()
+		load_meshes()
 		
 		gpu_painter.attach_terrain_material(object.get_material())
 		
@@ -72,7 +75,8 @@ func _make_visible(visible: bool):
 
 func _apply_changes():
 	if is_terrain_valid():
-		current_terrain.get_material()._apply_editor_normalmap()
+		if current_terrain.has_material():
+			current_terrain.get_material()._apply_editor_normalmap()
 	
 func _forward_3d_gui_input(camera: Camera3D, event: InputEvent):
 	
@@ -120,6 +124,7 @@ func is_terrain_valid():
 
 func _terrain_on_material_changed():
 	gpu_painter.attach_terrain_material(current_terrain.get_material())
+	load_material_layers()
 	
 func _terrain_on_resolution_changed():
 	gpu_painter.update_resolution(current_terrain.get_size(), current_terrain.get_height())
@@ -136,24 +141,29 @@ func is_in_bounds(pixel_position: Vector2i, max_position: Vector2i):
 	var less_than_max: bool =  pixel_position.x < max_position.x and pixel_position.y < max_position.y
 	return more_than_min and less_than_max
 	
-func load_textures():
-	var textures: Array = []
-	if current_terrain.has_material():
-		textures = current_terrain.get_material().get_textures()
-	toolbar.load_textures(textures, on_surface_texture_changed)
-	
-func load_meshes():
-	toolbar.load_meshes(current_terrain.get_particle_meshes(), on_particle_mesh_changed)
-
-func on_surface_texture_changed(texture: Texture2D, index: int, is_albedo: bool = true):
+func load_material_layers():
+	var layers: Array[TerrainLayerMaterial3D] = []
 	if is_terrain_valid():
 		if current_terrain.has_material():
-			current_terrain.get_material().set_texture(texture, index, is_albedo)
-		call_deferred("load_textures")
+			layers = current_terrain.get_material().get_material_layers()
+	toolbar.load_material_layers(layers, on_material_layer_changed)
+	
+func load_meshes():
+	var meshes: Array[Array]
+	if is_terrain_valid():
+		meshes = current_terrain.get_particle_meshes()
+	toolbar.load_meshes(meshes, on_particle_mesh_changed)
+
+func on_material_layer_changed(material: TerrainLayerMaterial3D, layer: int):
+	if is_terrain_valid():
+		if current_terrain.has_material():
+			current_terrain.get_material().set_material_layer(material, layer)
+		call_deferred("load_material_layers")
 		
 func on_particle_mesh_changed(mesh: Mesh, layer: int, index: int):
 	if is_terrain_valid():
-		current_terrain.set_particle_mesh(mesh, layer, index)
+		if current_terrain.has_material():
+			current_terrain.set_particle_mesh(mesh, layer, index)
 		call_deferred("load_meshes")
 		
 func paint_height(uv: Vector2):
@@ -197,8 +207,8 @@ func paint_splat(uv: Vector2):
 	var brush_shape = toolbar.get_brush_shape()
 	var brush_shape_size = brush_shape.get_size()
 	
-	var brush_color = color_channels[wrapi(toolbar.get_texture_layer(), 1, 5) - 1]
-	var splat_index = (toolbar.get_texture_layer() - 1) / 4
+	var brush_color = color_channels[wrapi(toolbar.get_material_layer(), 1, 5) - 1]
+	var splat_index = (toolbar.get_material_layer() - 1) / 4
 	
 	var rand_rotation = PI * randf()
 

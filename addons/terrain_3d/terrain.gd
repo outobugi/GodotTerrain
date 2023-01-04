@@ -22,7 +22,6 @@ const _PARTICLE_SHADER: Shader = preload("res://addons/terrain_3d/particle.gdsha
 const _EDITOR_COLLISION_SIZE: int = 256
 const _MIN_TRAVEL_DISTANCE: float = 8.0
 
-var _previous_camera_position: Vector3
 var _update_pending: bool = false
 
 @export_enum("512:512", "1024:1024", "2048:2048", "4096:4096", "8192:8192") var size: int = 1024 :
@@ -34,14 +33,11 @@ var _update_pending: bool = false
 
 @export var lod_count: int = 4 :
 	set = set_lod_count
-@export_enum("32:32", "64:64", "128:128", "256:256") var lod_size: int = 128 :
+@export_enum("32:32", "64:64", "128:128", "256:256") var lod_size: int = 64 :
 	set = set_lod_size
+@export var lod_bias: float = 0.2 :
+	set = set_lod_bias
 
-@export var lod_distance: int = 128
-
-@export var lod_disable: bool = false :
-	set = set_disabled
-	
 @export_group("Material", "surface_")
 
 @export var surface_material: TerrainMaterial3D :
@@ -49,7 +45,7 @@ var _update_pending: bool = false
 
 @export_subgroup("Particles", "particle_")
 
-@export var particle_draw_distance: int = 128 :
+@export var particle_draw_distance: int = 64 :
 	set = set_particle_draw_distance
 	
 @export var particle_density: int = 4 :
@@ -62,12 +58,12 @@ var particle_mask_texture: Texture2D
 
 @export_group("Collision", "collision_")
 
-@export_flags_3d_physics var collision_layer: int = 0
-@export_flags_3d_physics var collision_mask: int = 0
+@export_flags_3d_physics var collision_layer: int = 1
+@export_flags_3d_physics var collision_mask: int = 1
 
 var physics_body: StaticBody3D
-var meshes: Array[ChunkMesh]
-var chunks: Array[ChunkInstance3D]
+var mesh: TerrainGridMesh
+var grid: Array[RID]
 var camera: Camera3D
 
 func _init():
@@ -77,10 +73,10 @@ func _init():
 		call_deferred("update")
 		
 func _exit_tree():
+	clear()
 	set_process(false)
 		
 func _process(delta):
-	
 	if !camera:
 		if Engine.is_editor_hint():
 			camera = TerrainUtil.get_camera()
@@ -88,24 +84,14 @@ func _process(delta):
 			camera = get_viewport().get_camera_3d()
 	else:
 		var camera_position = camera.global_transform.origin * Vector3(1,0,1)
-		var distance_traveled: float = _previous_camera_position.distance_to(camera_position)
 		
-		if distance_traveled > _MIN_TRAVEL_DISTANCE:
-			_previous_camera_position = camera_position
-			
-			for chunk in chunks:
-				
-				var chunk_pos: Vector3 = chunk.global_transform.origin * Vector3(1,0,1)
-				var distance: float = (chunk_pos.distance_to(camera_position))
-				var new_lod_level = min(int(distance) / lod_distance, lod_count - 1)
-				var old_lod_level = chunk.get_current_lod_level()
-				
-				if new_lod_level != old_lod_level:
-					chunk.set_current_lod_level(new_lod_level)
-					chunk.mesh = meshes[new_lod_level]
-					
 		for emitter in particle_emitters:
 			emitter.global_transform.origin = camera_position
+			
+func set_visible(value: bool):
+	super(value)
+	for i in grid:
+		RenderingServer.instance_set_visible(i, value)
 				
 func set_size(value: int):
 	if value != size:
@@ -138,12 +124,14 @@ func set_lod_count(value: int):
 		lod_count = value
 		if !_update_pending:
 			call_deferred("update")
+			
+func set_lod_bias(value: float):
+	if value != lod_bias:
+		lod_bias = value
+		if !_update_pending:
+			for i in grid:
+				RenderingServer.instance_geometry_set_lod_bias(i, lod_bias)
 		
-## Disables/freezes LOD processing.
-func set_disabled(value: bool):
-	set_process(!value)
-	lod_disable = value
-	
 func set_particle_draw_distance(value: int):
 	particle_draw_distance = value
 	update_particles()
@@ -175,13 +163,13 @@ func get_particle_meshes():
 ## Sets the [TerrainMaterial3D] to all LOD meshes.
 func set_material(material: TerrainMaterial3D):
 	surface_material = material
-	surface_material.call_deferred("set_height", height)
-	surface_material.call_deferred("set_size", size)
+	if surface_material:
+		surface_material.call_deferred("set_height", height)
+		surface_material.call_deferred("set_size", size)
 	
 	call_deferred("emit_signal", "material_changed")
 	
-	for mesh in meshes:
-		mesh.surface_set_material(0, surface_material)
+	mesh.surface_set_material(0, surface_material)
 	
 ## Returns the assigned [TerrainMaterial3D]
 func get_material() -> TerrainMaterial3D:
@@ -202,7 +190,7 @@ func update_particles():
 	if particle_mesh_array.is_empty():
 		particle_mesh_array.append(Array())
 		particle_mesh_array.append(Array())
-	
+
 	if particle_mesh_array[0].size() < particle_emitters.size():
 		var count: int = particle_emitters.size() - particle_mesh_array[0].size()
 		for i in count:
@@ -224,12 +212,7 @@ func update_particles():
 		# Why does it need to divided twice by the density? only way I got it to keep the area the same
 		var instance_count: int = instance_area / particle_density / particle_density
 		
-		var splat_channels: Array[Color] = [
-			Color(1,0,0,0),
-			Color(0,1,0,0),
-			Color(0,0,1,0),
-			Color(0,0,0,1),
-		]
+		var splat_channels: Array[Color] = [Color(1,0,0,0), Color(0,1,0,0), Color(0,0,1,0), Color(0,0,0,1)]
 		
 		var index: int = 0
 		for emitter in particle_emitters:
@@ -245,68 +228,67 @@ func update_particles():
 				aabb.size = Vector3(instance_area, height, instance_area)
 				aabb.position = -(aabb.size / 2.0)
 				emitter.set_visibility_aabb(aabb)
+				
 				var material: ShaderMaterial = emitter.get_process_material()
 				if !material:
 					material = ShaderMaterial.new()
 					material.set_shader(_PARTICLE_SHADER)
-					material.set_shader_parameter("terrain_heightmap", surface_material.get_shader_parameter("terrain_heightmap"))
-					material.set_shader_parameter("terrain_normalmap", surface_material.get_shader_parameter("terrain_normalmap"))
+					material.set_shader_parameter("terrain_heightmap", surface_material.get_heightmap())
+					material.set_shader_parameter("terrain_normalmap", surface_material.get_normalmap())
 					emitter.set_process_material(material)
+					
 				material.set_shader_parameter("terrain_height", height)
 				material.set_shader_parameter("terrain_size", size)
 				material.set_shader_parameter("seed", index)
 				material.set_shader_parameter("instance_count", instance_count)
 				material.set_shader_parameter("instance_density", particle_density)
-				var splatmap_parameter: String = "terrain_splatmap_0" + str(((layer - 1) / 4)+1)
-				material.set_shader_parameter("terrain_splatmap", surface_material.get_shader_parameter(splatmap_parameter))
-				var splat_channel: Color = splat_channels[wrapi(layer, 1, 5) - 1]
+				material.set_shader_parameter("terrain_splatmap", surface_material.get_splatmap(layer / 4))
+				var splat_channel: Color = splat_channels[wrapi(layer, 0, 4)]
 				material.set_shader_parameter("terrain_splatmap_channel", splat_channel)
-				
 			index += 1
 		
 ## Updates all of the terrain. Calls every [i]update_[/i] function.
 func update():
 
 	clear()
-	update_lod()
 	
-	if meshes.is_empty():
-		print("Terrain failed. No meshes were created.")
-		return
-
 	update_material()
 	update_particles()
 	update_collision()
 	
 	var offset = Vector3(1,0,1) * (lod_size / 2)
-	
 	var side: int = size / lod_size
+	var scenario: RID = get_world_3d().get_scenario()
+	
+	mesh = TerrainGridMesh.new(float(lod_size), lod_count)
+	mesh.surface_set_material(0, surface_material)
 	
 	for x in side:
 		for z in side:
-			var chunk: ChunkInstance3D = ChunkInstance3D.new()
-			add_child(chunk)
-			chunk.set_mesh(meshes[0]) 
+			var instance: RID = RenderingServer.instance_create2(mesh.get_rid(), scenario)
 			var pos = Vector3(x - (side / 2), 0, z - (side / 2)) * lod_size + offset
-			chunk.call_deferred("set_position", pos)
-			chunks.push_back(chunk)
+			var t: Transform3D = Transform3D(Basis(), pos)
+			
+			RenderingServer.instance_set_transform(instance, t)
+			RenderingServer.instance_geometry_set_lod_bias(instance, lod_bias)
+			
+			grid.push_back(instance)
 			
 	update_aabb()
-	
 	_update_pending = false
 	
-## Removes all chunks from the terrain.
+## Clear all chunk instances.
 func clear():
-	for i in chunks:
-		i.queue_free()
-	chunks.clear()
+	for i in grid:
+		RenderingServer.free_rid(i)
+	grid.clear()
 	
-## Updates each chunk's [AABB] to match the terrain height
+## Updates each chunk's [AABB] to match the terrain height.
 func update_aabb():
-	for chunk in chunks:
-		var aabb: AABB = chunk.get_aabb()
-		aabb.size.y = height * 2
-		chunk.set_custom_aabb(aabb)
+	for i in grid:
+		var aabb_size: Vector3 = Vector3(lod_size+2, height, lod_size+2)
+		var aabb: AABB = AABB(Vector3(-lod_size/2, -2, -lod_size/2), aabb_size)
+		RenderingServer.instance_set_custom_aabb(i, aabb)
 		
 ## Creates a missing or updates current [StaticBody] with [HeightMapShape3D] and applies existing heightmap to it.
 func update_collision():
@@ -355,27 +337,7 @@ func update_collision():
 				map_data.push_back(h)
 		
 		collision_shape.shape.set_map_data(map_data)
-	
-## Updates chunk mesh LODs
-func update_lod():
-	
-	if !lod_count:
-		return 
 		
-	meshes.resize(lod_count)
-	var previous_subdivision: int = 1
-	
-	var subdivision = (lod_size / previous_subdivision)
-	
-	for i in lod_count:
-		
-		var mesh = ChunkMesh.new(subdivision, lod_size)
-		mesh.surface_set_material(0, surface_material)
-		meshes[i] = mesh
-		
-		previous_subdivision *= 2
-		subdivision = (lod_size / previous_subdivision)
-
 func _notification(what):
 	
 	if what == NOTIFICATION_TRANSFORM_CHANGED:
@@ -397,188 +359,131 @@ func _get_property_list():
 	]
 	return property_list
 
-class ChunkInstance3D extends MeshInstance3D:
-	
-	var lod_level: int = -1
-	
-	func set_current_lod_level(value: int):
-		lod_level = value
-		
-	func get_current_lod_level():
-		return lod_level
+class TerrainGridMesh extends ArrayMesh:
 
-class ChunkMesh extends ArrayMesh:
-	
-	# Do not look here. It's ugly.
-	# Source for the mesh generation: https://catlikecoding.com/unity/tutorials/rounded-cube/
-	
-	var size: Vector3 = Vector3.ONE
-	
-	func _init(_subdivision: int = 2, _width: int = 64, _height: int = 1):
+	func _init(size: float, lod_count: int):
 		
-		size = Vector3(_width, _height, _width)
+		lod_count -= 1
 		
-		var _data = create(_subdivision)
+		var vertices: PackedVector3Array = PackedVector3Array()
+		var indices: Array[PackedInt32Array] = []
+
+		var index: int = 0
+		var subdv = size
+		var ofs = Vector3(size,0.0,size) / 2.0
+		var previous_subdv = 1.0
+
+		var count = lod_count
+
+		while count >= 0:
+			var lod_indices: PackedInt32Array = PackedInt32Array()
+			# top
+			for y in subdv:
+				for x in subdv:
+					vertices.append(Vector3(x / subdv * size, 0.0, y / subdv * size) - ofs)
+					vertices.append(Vector3(x / subdv * size + size / subdv, 0.0, y / subdv * size) - ofs)
+					vertices.append(Vector3(x / subdv * size, 0.0, y / subdv * size + size / subdv) - ofs)
+					vertices.append(Vector3(x / subdv * size, 0.0, y / subdv * size + size / subdv) - ofs)
+					vertices.append(Vector3(x / subdv * size + size / subdv, 0.0, y / subdv * size) - ofs)
+					vertices.append(Vector3(x / subdv * size + size / subdv, 0.0, y / subdv * size + size / subdv) - ofs)
+					lod_indices.append(index)
+					lod_indices.append(index + 1)
+					lod_indices.append(index + 2)
+					lod_indices.append(index + 3)
+					lod_indices.append(index + 4)
+					lod_indices.append(index + 5)
+					index += 6;
+			# front
+			for x in subdv:
+				vertices.append(Vector3(x / subdv * size, -1, 0) - ofs)
+				vertices.append(Vector3(x / subdv * size + size / subdv, -1, 0) - ofs)
+				vertices.append(Vector3(x / subdv * size, 0, 0) - ofs)
+				vertices.append(Vector3(x / subdv * size, 0, 0) - ofs)
+				vertices.append(Vector3(x / subdv * size + size / subdv, -1, 0) - ofs)
+				vertices.append(Vector3(x / subdv * size + size / subdv, 0, 0) - ofs)
+				lod_indices.append(index)
+				lod_indices.append(index + 1)
+				lod_indices.append(index + 2)
+				lod_indices.append(index + 3)
+				lod_indices.append(index + 4)
+				lod_indices.append(index + 5)
+				index += 6;
+				
+			# back
+			for x in subdv:
+				vertices.append(Vector3(x / subdv * size + size / subdv, 0, size) - ofs)
+				vertices.append(Vector3(x / subdv * size + size / subdv, -1, size) - ofs)
+				vertices.append(Vector3(x / subdv * size, 0, size) - ofs)
+				vertices.append(Vector3(x / subdv * size, 0, size) - ofs)
+				vertices.append(Vector3(x / subdv * size + size / subdv, -1, size) - ofs)
+				vertices.append(Vector3(x / subdv * size, -1, size) - ofs)
+				lod_indices.append(index)
+				lod_indices.append(index + 1)
+				lod_indices.append(index + 2)
+				lod_indices.append(index + 3)
+				lod_indices.append(index + 4)
+				lod_indices.append(index + 5)
+				index += 6;
+				
+			# right
+			for x in subdv:
+				vertices.append(Vector3(0, 0, x / subdv * size + size / subdv) - ofs)
+				vertices.append(Vector3(0, -1, x / subdv * size + size / subdv) - ofs)
+				vertices.append(Vector3(0, 0, x / subdv * size) - ofs)
+				vertices.append(Vector3(0, 0, x / subdv * size) - ofs)
+				vertices.append(Vector3(0, -1, x / subdv * size + size / subdv) - ofs)
+				vertices.append(Vector3(0, -1, x / subdv * size) - ofs)
+				lod_indices.append(index)
+				lod_indices.append(index + 1)
+				lod_indices.append(index + 2)
+				lod_indices.append(index + 3)
+				lod_indices.append(index + 4)
+				lod_indices.append(index + 5)
+				index += 6;
+				
+			# left
+			for x in subdv:
+				vertices.append(Vector3(size, -1, x / subdv * size) - ofs)
+				vertices.append(Vector3(size, -1, x / subdv * size + size / subdv) - ofs)
+				vertices.append(Vector3(size, 0, x / subdv * size) - ofs)
+				vertices.append(Vector3(size, 0, x / subdv * size) - ofs)
+				vertices.append(Vector3(size, -1, x / subdv * size + size / subdv) - ofs)
+				vertices.append(Vector3(size, 0, x / subdv * size + size / subdv) - ofs)
+				lod_indices.append(index)
+				lod_indices.append(index + 1)
+				lod_indices.append(index + 2)
+				lod_indices.append(index + 3)
+				lod_indices.append(index + 4)
+				lod_indices.append(index + 5)
+				index += 6;
+					
+			previous_subdv *= 2
+			subdv = (size / previous_subdv)
+			indices.append(lod_indices)
+			
+			count -= 1
 		
 		var arrays = []
-		arrays.resize(ArrayMesh.ARRAY_MAX)
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = vertices
+		arrays[Mesh.ARRAY_INDEX] = indices[0]
+		var blend_shapes = []
 		
-		arrays[ArrayMesh.ARRAY_VERTEX] = _data[0]
-		arrays[ArrayMesh.ARRAY_INDEX] = _data[1]
+		var lods = {}
+		for i in lod_count:
+			lods[float(i+1)] = indices[i + 1]
 		
-		add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-		
-	func create(subdivision):
-		
-		var bounds = Vector3(subdivision, 1, subdivision)
-		
-		var offset = subdivision / 2
-
-		var subdivision_y = 1
-
-		var cornerVertices = 8
-		var edgeVertices = (subdivision + subdivision_y + subdivision - 3) * 4
-		
-		var faceVertices = (
-			(subdivision - 1) * (subdivision_y - 1) +
-			(subdivision - 1) * (subdivision - 1) +
-			(subdivision_y - 1) * (subdivision - 1)) * 2
-			
-		var vertices = PackedVector3Array()
-		
-		var triangles = []
-		
-		vertices.resize(cornerVertices + edgeVertices + faceVertices)
-		
-		var v = 0
-		var y = 0
-		
-		while y <= subdivision_y:
-			var x = 0
-			
-			while x <= subdivision:
-				vertices[v] = (Vector3(x-offset,y-1 ,0-offset) / bounds) * size
-				x += 1
-				v += 1
-			var z = 1
-			while z <= subdivision:
-				vertices[v] =( Vector3(subdivision-offset,y-1,z-offset) / bounds) * size
-				z += 1
-				v += 1
-			x = subdivision - 1
-			
-			while x >= 0:
-				vertices[v] = (Vector3(x-offset,y-1,subdivision-offset) / bounds) * size
-				x -= 1
-				v += 1
-			z = subdivision - 1
-			while z > 0:
-				vertices[v] = (Vector3(0-offset,y-1,z-offset) / bounds) * size
-				z -= 1
-				v += 1
-			y += 1
-
-		var z = 1
-		
-		while z < subdivision:
-			var x = 1
-			while x < subdivision:
-				vertices[v] = (Vector3(x-offset, 0, z-offset) / bounds) * size
-				x += 1
-				v += 1
-			z += 1
-		z = 1
-		while z < subdivision:
-			var x = 1
-			while x < subdivision:
-				vertices[v] = (Vector3(x-offset, 0, z-offset) / bounds) * size
-				x += 1
-				v += 1
-			z += 1
-
-		triangles = set_tris(subdivision, subdivision_y)
-
-		return [vertices, triangles]
-
-	func set_tris(subdivision, subdivision_y):
-		
-		var quads = (subdivision * subdivision_y + subdivision * subdivision + subdivision_y * subdivision) * 2
-		var tris = []
-		tris.resize(quads*6) 
-		var ring = (subdivision+subdivision) * 2
-		var t = 0
-		var v = 0
-		var y = 0
-		
-		while y < subdivision_y:
-			var q = 0
-			while q < ring - 1:
-				t = set_quad(tris, t, v, v+1, v+ring, v+ring+1)
-				v += 1
-				q += 1
-			t = set_quad(tris, t, v, v-ring+1, v+ring, v+1)
-			y += 1
-			v += 1
-			
-		var top_v = ring * subdivision_y
-		var x = 0
-		
-		while x < (subdivision - 1):
-			t = set_quad(tris, t, top_v, top_v+1, top_v+ring-1, top_v+ring)
-			x += 1
-			top_v += 1
-		t = set_quad(tris, t, top_v, top_v+1, top_v+ring-1, top_v+2)
-		
-		var vmin = (ring * (subdivision_y+1)) - 1
-		var vmid = vmin + 1
-		var vmax = top_v + 2
-		
-		var z = 1
-		while z < (subdivision - 1):
-			t = set_quad(tris, t, vmin, vmid, vmin-1, vmid+subdivision-1)
-			x = 1
-			while x < (subdivision - 1):
-				t = set_quad(tris, t, vmid, vmid+1, vmid+subdivision-1, vmid+subdivision)
-				x += 1
-				vmid += 1
-			t = set_quad(tris, t, vmid, vmax, vmid+subdivision-1, vmax+1)
-			z += 1
-			vmin -= 1
-			vmid += 1
-			vmax += 1
-			
-		var vtop = vmin - 2
-		t = set_quad(tris, t, vmin, vmid, vtop+1, vtop)
-		x = 1
-		while x < (subdivision - 1):
-			t = set_quad(tris, t, vmid, vmid+1, vtop, vtop-1)
-			x += 1
-			vtop -= 1
-			vmid += 1
-		t = set_quad(tris, t, vmid, vtop-2, vtop, vtop-1)
-
-		return PackedInt32Array(tris)
-
-	func set_quad(tris, i, v00, v10, v01, v11):
-		
-		tris[i] = v00
-		tris[i+4] = v10
-		tris[i+1] = tris[i+4]
-		tris[i+3] = v01
-		tris[i+2] = tris[i+3]
-		tris[i+5] = v11
-		return i + 6
+		add_surface_from_arrays(RenderingServer.PRIMITIVE_TRIANGLES, arrays, [], lods)
+	
 
 class TerrainUtil extends Object:
-	
-	# Helper class.
 	
 	static func get_camera():
 		var editor_script: EditorScript = EditorScript.new()
 		var editor_interface: EditorInterface = editor_script.get_editor_interface()
 		var camera = find_editor_camera(editor_interface.get_editor_main_screen().get_children())
 		return camera
-
+		
 	static func find_editor_camera(nodes: Array):
 		for child in nodes:
 			var camera: Camera3D = find_editor_camera(child.get_children())

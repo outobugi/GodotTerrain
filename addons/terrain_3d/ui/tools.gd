@@ -1,7 +1,8 @@
 @tool
 extends VBoxContainer
 
-# A lot of duplicate code and bad naming and no comments
+# A mess that it called UI code.
+# Needs renaming and refactoring
 
 const BRUSH_PREVIEW_MATERIAL: ShaderMaterial = preload("res://addons/terrain_3d/ui/brush_preview.material")
 
@@ -14,12 +15,13 @@ enum ToolMode {
 const MAX_BRUSH_SIZE: int = 512
 
 var tool_mode: ToolMode = ToolMode.HEIGHT
-var accent_color: Color
+
 var brush_size: int = 64
 var brush_opacity: float = 0.1
 var brush_height: float = 1.0
-var texture_layer: int = 1
-var texture_layer_buttons: Array[Button]
+var material_layer: int = 0
+
+var editor_interface: EditorInterface
 
 @onready var brush_height_control = get_node("BrushHeight")
 
@@ -38,14 +40,18 @@ var texture_layer_buttons: Array[Button]
 @onready var tool_paint_texture = get_node("Buttons/ToolTexture")
 @onready var tool_paint_multimesh = get_node("Buttons/ToolMultiMesh")
 
-@onready var texture_layers_control = get_node("TextureLayers")
-@onready var texture_layers_list = texture_layers_control.get_node("LayersContainer/Layers")
-@onready var texture_layer_error = texture_layers_control.get_node("LayerError")
+@onready var material_layers_control = get_node("MaterialLayers")
+@onready var material_layers_list = material_layers_control.get_node("VBox/Container/Layers")
 
 @onready var mesh_layers_control = get_node("MeshLayers")
-@onready var mesh_layers_list = mesh_layers_control.get_node("LayersContainer/Layers")
+@onready var mesh_layers_list = mesh_layers_control.get_node("VBox/Container/Layers")
 
-func init_tools():
+@onready var category_labels: Array = [
+	$MaterialLayers/VBox/Label,
+	$MeshLayers/VBox/Label
+]
+
+func init_toolbar():
 	brush_size_slider.connect("value_changed", brush_size_changed)
 	brush_opacity_slider.connect("value_changed", brush_opacity_changed)
 	brush_height_slider.connect("value_changed", brush_height_changed)
@@ -68,7 +74,17 @@ func init_tools():
 	set_tool_mode(true, ToolMode.HEIGHT)
 	
 	load_brushes()
+
+	# Set up theme
 	
+	for label in category_labels:
+		label.set("theme_override_styles/normal", get_theme_stylebox("bg", "EditorInspectorCategory"))
+		label.set("theme_override_fonts/font", get_theme_font("bold", "EditorFonts"))
+		label.set("theme_override_font_sizes/font_size",get_theme_font_size("bold_size", "EditorFonts"))
+	
+	mesh_layers_control.set("theme_override_styles/panel", get_theme_stylebox("panel", "Panel"))
+	material_layers_control.set("theme_override_styles/panel", get_theme_stylebox("panel", "Panel"))
+
 func load_brushes():
 	var path: String = "res://addons/terrain_3d/brush/"
 	var brush_directory: DirAccess = DirAccess.open(path)
@@ -76,7 +92,9 @@ func load_brushes():
 	
 	for button in brush_shape_list.get_children():
 		button.queue_free()
-	
+		
+	var brush_count: int = 0
+		
 	brush_directory.list_dir_begin()
 	var brush_name = brush_directory.get_next()
 	while brush_name:
@@ -84,29 +102,33 @@ func load_brushes():
 			if brush_name.ends_with(".png"):
 				var brush: Image = load(path+brush_name)
 				var texture: ImageTexture = ImageTexture.create_from_image(brush)
-				var brush_button: TextureButton = TextureButton.new()
-				brush_button.ignore_texture_size = true
+				var brush_button: Button = Button.new()
+			
 				brush_button.toggle_mode = true
 				brush_button.action_mode = 0
-				brush_button.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
 				brush_button.button_group = brush_shape_button_group
-				brush_button.custom_minimum_size = Vector2(24,24)
-				brush_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-				brush_button.texture_normal = texture
+				brush_button.custom_minimum_size = Vector2(33,33)
+				brush_button.size_flags_vertical = SIZE_SHRINK_CENTER
+				brush_button.expand_icon = true
+				brush_button.icon = texture
 				brush_button.material = BRUSH_PREVIEW_MATERIAL
-				brush_button.connect("toggled", _on_brush_selected.bind(brush_button))
+
 				if is_first:
 					brush_button.call_deferred("set_pressed", true)
 					is_first = false
 				brush_shape_list.add_child(brush_button)
+				
+				brush_count += 1
 		brush_name = brush_directory.get_next()
 
+	if brush_count == 0:
+		print("No brushes found! Please check the brush folder in addons/terrain_3d/brush")
 
 func set_tool_mode(toggle: bool, mode: ToolMode):
 	if toggle:
 		tool_mode = mode
 	
-	texture_layers_control.hide()
+	material_layers_control.hide()
 	brush_height_control.hide()
 	mesh_layers_control.hide()
 
@@ -114,7 +136,7 @@ func set_tool_mode(toggle: bool, mode: ToolMode):
 		ToolMode.HEIGHT:
 			brush_height_control.show()
 		ToolMode.TEXTURE:
-			texture_layers_control.show()
+			material_layers_control.show()
 		ToolMode.PARTICLE:
 			mesh_layers_control.show()
 			
@@ -134,13 +156,13 @@ func get_brush_opacity():
 	return brush_opacity_slider.get_value()
 	
 func get_brush_shape():
-	return brush_shape_button_group.get_pressed_button().get_texture_normal().get_image()
+	return brush_shape_button_group.get_pressed_button().get_button_icon().get_image()
 	
 func get_brush_height():
 	return brush_height_slider.get_value()
 	
-func get_texture_layer():
-	return texture_layer
+func get_material_layer():
+	return material_layer
 
 func brush_size_changed(new_value):
 	brush_size = new_value
@@ -154,20 +176,18 @@ func brush_height_changed(new_value):
 	brush_height = new_value
 	brush_height_value.set_text(str(new_value))
 	
-func _on_brush_selected(toggled: bool, brush_button: TextureButton):
-	for button in brush_shape_list.get_children():
-		button.modulate = Color.WHITE
-	brush_button.modulate = accent_color
+func _on_resource_inspected(resource: Resource):
+	editor_interface.inspect_object(resource, "", true)
 	
-func _on_texture_selected(id: int):
-	for layer in texture_layers_list.get_children():
+func _on_material_layer_selected(id: int):
+	for layer in material_layers_list.get_children():
 		if layer.id != id:
 			layer.set_selected(false)
-	texture_layer = id + 1
+	material_layer = id
 	
-func clear_texture_layers():
-	for node in texture_layers_list.get_children():
-		if node is TextureLayerContainer:
+func clear_material_layers():
+	for node in material_layers_list.get_children():
+		if node is MaterialLayerContainer:
 			node.queue_free()
 			
 func clear_mesh_layers():
@@ -175,125 +195,127 @@ func clear_mesh_layers():
 		if node is MeshLayerContainer:
 			node.queue_free()
 	
-func load_textures(data: Array, callback: Callable):
-	clear_texture_layers()
-
-	var show_next_empty: bool = false
+func load_material_layers(data: Array[TerrainLayerMaterial3D], callback: Callable):
+	
+	clear_material_layers()
+	
 	var layer_count: int = 0
 	
 	if !data.is_empty():
-		var albedo_arr: Array = data[0]
-		var normal_arr: Array = data[1]
-		
-		layer_count = albedo_arr.size()
+		layer_count = data.size()
 		
 		for i in layer_count:
-			var layer: TextureLayerContainer = TextureLayerContainer.new(i)
-			var albedo: Texture2D = albedo_arr[i]
-			var normal: Texture2D = null
+			var layer: MaterialLayerContainer = MaterialLayerContainer.new(i)
+			var mat: TerrainLayerMaterial3D = data[i]
+
+			layer.set_layer_data(mat)
+			layer.set_selected(i == material_layer)
 			
-			if i < normal_arr.size():
-				normal = normal_arr[i]
-			
-			show_next_empty = normal != null
-			
-			layer.set_layer_data(albedo, normal)
-			layer.set_selected(i == texture_layer - 1)
-			
-			layer.connect("selected", _on_texture_selected)
+			layer.connect("inspected", _on_resource_inspected)
+			layer.connect("selected", _on_material_layer_selected)
 			layer.connect("changed", callback)
 			
-			texture_layers_list.add_child(layer)
-		
-	texture_layer_error.set_visible(!show_next_empty)
-		
-	if layer_count < 16 and show_next_empty or layer_count == 0:
-		var empty_layer: TextureLayerContainer = TextureLayerContainer.new(layer_count)
-		empty_layer.connect("selected", _on_texture_selected)
+
+			material_layers_list.add_child(layer)
+
+	if layer_count < TerrainMaterial3D.LAYERS_MAX or layer_count == 0:
+		var empty_layer: MaterialLayerContainer = MaterialLayerContainer.new(layer_count)
+		empty_layer.connect("selected", _on_material_layer_selected)
 		empty_layer.connect("changed", callback)
-		texture_layers_list.add_child(empty_layer)
+		material_layers_list.add_child(empty_layer)
 		
-func load_meshes(data: Array, callback: Callable):
+func load_meshes(data: Array[Array], callback: Callable):
 	clear_mesh_layers()
 	
-	var layer_count: int = data[0].size()
-	var show_next_empty: bool = false
+	var layer_count: int = 0
 	
-	for i in layer_count:
-		var layer: MeshLayerContainer = MeshLayerContainer.new(i)
-		var mesh: Mesh = data[0][i]
+	if !data.is_empty():
+		layer_count = data[0].size()
+		for i in layer_count:
+			var layer: MeshLayerContainer = MeshLayerContainer.new(i)
+			var mesh: Mesh = data[0][i]
+			
+			layer.set_layer_data(mesh, data[1][i])
+			layer.connect("inspected", _on_resource_inspected)
+			layer.connect("changed", callback)
+			
+			mesh_layers_list.add_child(layer)
+
+	var empty_layer: MeshLayerContainer = MeshLayerContainer.new(layer_count)
+	empty_layer.connect("changed", callback)
+	mesh_layers_list.add_child(empty_layer)
 		
-		show_next_empty = mesh != null
-		
-		layer.set_layer_data(mesh, data[1][i])
-		layer.connect("changed", callback)
-		
-		mesh_layers_list.add_child(layer)
-		
-	if show_next_empty or layer_count == 0:
-		var empty_layer: MeshLayerContainer = MeshLayerContainer.new(layer_count)
-		empty_layer.connect("changed", callback)
-		mesh_layers_list.add_child(empty_layer)
-		
-class TextureLayerContainer extends HBoxContainer:
+class MaterialLayerContainer extends HBoxContainer:
 	
 	signal selected(id: int)
-	signal changed(texture: Texture2D, id: int, is_albedo: bool)
+	signal changed(layer_material: TerrainLayerMaterial3D, id: int)
+	signal inspected(layer_material: TerrainLayerMaterial3D)
 	
 	var is_selected: bool = false
 	
-	var main_button: Button
-	var albedo_picker: EditorResourcePicker
-	var normal_picker: EditorResourcePicker
+	var material_picker: EditorResourcePicker
 	
 	var id: int
 	
 	func _init(layer: int):
 		id = layer
-		albedo_picker = EditorResourcePicker.new()
-		albedo_picker.set_base_type("Texture2D")
-		albedo_picker.connect("resource_changed", _on_changed.bind(true))
-		albedo_picker.set_toggle_mode(true)
-		main_button = albedo_picker.get_child(0)
+		material_picker = EditorResourcePicker.new()
+		material_picker.set_base_type("TerrainLayerMaterial3D")
+		material_picker.connect("resource_changed", _on_changed)
+		material_picker.connect("resource_selected", _on_selected)
 		
-		main_button.connect("toggled", _on_selected)
-		
-		normal_picker = EditorResourcePicker.new()
-		normal_picker.set_base_type("Texture2D")
-		normal_picker.connect("resource_changed", _on_changed.bind(false))
+		var label = Label.new()
 	
-		albedo_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		normal_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.text = "Layer "+str(id+1)
+		label.size_flags_horizontal = SIZE_EXPAND_FILL
+		label.size_flags_vertical = SIZE_EXPAND_FILL
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		
-		add_child(albedo_picker)
-		add_child(normal_picker)
+		material_picker.size_flags_horizontal = SIZE_EXPAND_FILL
+		size_flags_horizontal = SIZE_EXPAND_FILL
 		
-	func _on_changed(texture: Variant, is_albedo: bool):
+		add_child(label)
+		add_child(material_picker)
+
+		queue_redraw()
+		
+	func _notification(what):
+		if what == NOTIFICATION_DRAW:
+			if is_selected:
+				var stylebox = get_theme_stylebox("bg_selected", "EditorProperty")
+				draw_style_box(stylebox, Rect2(Vector2.ZERO, get_size()))
+				
+	func _gui_input(event):
+		if event is InputEventMouseButton:
+			if event.button_index == MOUSE_BUTTON_LEFT:
+				emit_signal("selected", id)
+				set_selected(true)
+	
+	func _on_changed(layer_material: Variant):
 		# If texture is cleared, Object#null is passed
-		# which causes an error "Can't convert Object to Object. 4.0 beta 10
-		if texture == null:
-			texture = null
-		emit_signal("changed", texture, id, is_albedo)
+		# which causes an error "Can't convert Object to Object
+		if layer_material == null:
+			layer_material = null
+		emit_signal("changed", layer_material, id)
 		
-	func _on_selected(toggle: bool):
-		emit_signal("selected", id)
-		set_selected(toggle)
+	func _on_selected(layer_material: Variant, inspect: bool):
+		if inspect:
+			emit_signal("inspected", layer_material)
 		
-	func set_layer_data(albedo: Texture2D, normal: Texture2D):
-		albedo_picker.set_edited_resource(albedo)
-		normal_picker.set_edited_resource(normal)
-	
+	func set_layer_data(layer_material: TerrainLayerMaterial3D):
+		material_picker.set_edited_resource(layer_material)
+		
 	func set_selected(select: bool):
 		is_selected = select
-		main_button.set_pressed_no_signal(select)
-	
+		queue_redraw()
+
 class MeshLayerContainer extends HBoxContainer:
 	
 	signal changed(mesh: Mesh, layer: int, id: int)
+	signal inspected(mesh: Mesh)
 	
 	var mesh_picker: EditorResourcePicker
-	var layer_spinbox: SpinBox
+	var layer_list: OptionButton
 	
 	var id: int
 	
@@ -302,30 +324,39 @@ class MeshLayerContainer extends HBoxContainer:
 		mesh_picker = EditorResourcePicker.new()
 		mesh_picker.set_base_type("Mesh")
 		mesh_picker.connect("resource_changed", _on_mesh_changed)
+		mesh_picker.connect("resource_selected", _on_selected)
 		
-		layer_spinbox = SpinBox.new()
-		layer_spinbox.set_prefix("Layer")
-		layer_spinbox.set_min(1)
-		layer_spinbox.set_max(16)
-		layer_spinbox.connect("value_changed", _on_layer_changed)
+		layer_list = OptionButton.new()
+		
+		for i in TerrainMaterial3D.LAYERS_MAX:
+			layer_list.add_item("Layer " + str(i+1))
+		
+		layer_list.connect("item_selected", _on_layer_changed)
 	
-		layer_spinbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		mesh_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		layer_list.size_flags_horizontal = SIZE_EXPAND_FILL
+		mesh_picker.size_flags_horizontal = SIZE_EXPAND_FILL
+		size_flags_horizontal = SIZE_EXPAND_FILL
 		
-		add_child(layer_spinbox)
+		add_child(layer_list)
 		add_child(mesh_picker)
 	
 	func _on_mesh_changed(mesh: Variant):
 		if mesh == null:
 			mesh = null
-		emit_signal("changed", mesh, layer_spinbox.get_value(), id)
+		var layer = max(0, layer_list.get_selected())
+		emit_signal("changed", mesh, layer, id)
 		
 	func _on_layer_changed(layer: int):
-		emit_signal("changed", mesh_picker.get_edited_resource(), layer, id)
-		layer_spinbox.apply()
-	
+		var mesh: Variant = mesh_picker.get_edited_resource()
+		if mesh == null:
+			mesh = null
+		emit_signal("changed", mesh, layer, id)
+		
+	func _on_selected(mesh: Variant, inspect: bool):
+		if inspect:
+			emit_signal("inspected", mesh)
+		
 	func set_layer_data(mesh: Mesh, layer: int):
-		layer_spinbox.set_value_no_signal(layer)
 		mesh_picker.set_edited_resource(mesh)
+		layer_list._select_int(layer)
 		
