@@ -120,9 +120,8 @@ func _update_shader():
 	var code: String = "shader_type spatial;\n"
 	code += "uniform vec4 albedo_color = vec4(1.0);\n"
 	code += "uniform sampler2D albedo_texture : source_color,filter_linear_mipmap_anisotropic,repeat_enable;\n"
-	code += "uniform sampler2D normal_texture : hint_normal,filter_linear_mipmap_anisotropic,repeat_enable;\n"
+	code += "uniform sampler2D normal_texture : hint_roughness_normal,filter_linear_mipmap_anisotropic,repeat_enable;\n"
 	code += "uniform float normal_scale : hint_range(-16.0, 16.0, 0.1);\n"
-	code += "uniform sampler2D orm_texture : hint_roughness_g,filter_linear_mipmap_anisotropic,repeat_enable;\n"
 	code += "uniform vec3 uv_scale;\n"
 	code += "uniform bool uv_anti_tile;\n\n"
 	code += "void vertex(){\n"
@@ -130,11 +129,9 @@ func _update_shader():
 	code += "}\n\n"
 	code += "void fragment(){\n"
 	code += "	ALBEDO=texture(albedo_texture, UV).rgb * albedo_color.rgb;\n"
-	code += "	NORMAL_MAP=texture(normal_texture, UV).rgb;\n"
-	code += "	vec3 orm=texture(orm_texture, UV).rgb;\n"
-	code += "	AO=orm.r;\n"
-	code += "	ROUGHNESS=orm.g;\n"
-	code += "	METALLIC=orm.b;\n"
+	code += "	vec4 normal_map =texture(normal_texture, UV);\n"
+	code += "	NORMAL_MAP=normal_map.rgb;\n"
+	code += "	ROUGHNESS=normal_map.a;\n"
 	code += "}\n"
 	
 	_shader = RenderingServer.shader_create()
@@ -181,7 +178,7 @@ func _get_property_list():
 #			"hint_string": "-16, 16",
 #			"usage": PROPERTY_USAGE_DEFAULT,
 #		},
-		{
+{
 			"name": "ORM",
 			"type": TYPE_NIL,
 			"hint_string": "orm_",

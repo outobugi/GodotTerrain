@@ -250,17 +250,14 @@ func _update_textures():
 		albedo_textures.push_back(alb)
 		normal_textures.push_back(nor)
 		orm_textures.push_back(orm)
-		
-	texture_array_albedo = _convert_array(albedo_textures)
-	texture_array_normal = _convert_array(normal_textures)
-	texture_array_orm = _convert_array(orm_textures)
 	
+	texture_array_albedo = _convert_to_albedo_array(albedo_textures)
+	texture_array_normal = _convert_to_normal_array(normal_textures, orm_textures)
+
 	RenderingServer.material_set_param(get_rid(), "texture_array_albedo", texture_array_albedo.get_rid())
 	RenderingServer.material_set_param(get_rid(), "texture_array_normal", texture_array_normal.get_rid())
-	RenderingServer.material_set_param(get_rid(), "texture_array_orm", texture_array_orm.get_rid())
 	
 	RenderingServer.material_set_param(get_rid(), "texture_array_normal_max", texture_array_normal.get_layers() - 1)
-	RenderingServer.material_set_param(get_rid(), "texture_array_orm_max", texture_array_orm.get_layers() - 1)
 	
 	enable_grid(texture_array_albedo.get_layers() == 0)
 	emit_changed()
@@ -275,10 +272,10 @@ func _update():
 	_update_splatmaps()
 	_update_layers()
 
-func _convert_array(arr: Array) -> Texture2DArray:
+func _convert_to_albedo_array(array_albedo: Array) -> Texture2DArray:
 	
 	var img_arr: Array[Image]
-	for tex in arr:
+	for tex in array_albedo:
 		if tex != null:
 			var img: Image = tex.get_image()
 			
@@ -289,6 +286,58 @@ func _convert_array(arr: Array) -> Texture2DArray:
 			img.convert(Image.FORMAT_RGBA8)
 				
 			img_arr.push_back(img)
+			
+	var tex_arr = Texture2DArray.new()
+	if !img_arr.is_empty():
+		tex_arr.create_from_images(img_arr)
+		
+	return tex_arr
+	
+func _convert_to_normal_array(array_normal: Array, array_orm: Array) -> Texture2DArray:
+	
+	var img_arr: Array[Image]
+	
+	for i in array_normal.size():
+		
+		var nor: Texture2D = array_normal[i]
+		var orm: Texture2D
+		if array_orm.size() > i+1:
+			orm = array_orm[i]
+			
+		if nor != null:
+			var img_nor: Image = nor.get_image()
+			var img_nor_size: Vector2i = img_nor.get_size()
+			
+			if img_nor.is_compressed():
+				img_nor.decompress()
+			
+			var img_orm: Image
+			var img_orm_size: Vector2i
+			
+			if orm != null:
+				img_orm = orm.get_image()
+				img_orm_size = img_orm.get_size()
+				if img_orm.is_compressed():
+					img_orm.decompress()
+
+			var output_img: Image = Image.create(img_nor.get_size().x, img_nor.get_size().y, true, Image.FORMAT_RGBA8)
+			
+			for x in img_nor_size.x:
+				for y in img_nor_size.y:
+					var uv: Vector2 = Vector2(x, y) / Vector2(img_nor_size)
+					var n: Color = img_nor.get_pixel(x, y)
+					
+					var new_pixel = Color(n.r, n.a, 1.0, 1.0)
+					
+					if img_orm:
+						var o: Color = img_orm.get_pixelv(Vector2i(uv*Vector2(img_orm_size)))
+						new_pixel.b = o.g # Roughness
+						new_pixel.a = o.r # AO
+					
+					output_img.set_pixel(x, y, new_pixel)
+			
+			output_img.generate_mipmaps()
+			img_arr.push_back(output_img)
 			
 	var tex_arr = Texture2DArray.new()
 	if !img_arr.is_empty():
@@ -333,22 +382,7 @@ func _get_property_list():
 			"type": TYPE_INT,
 			"usage": PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY,
 		},
-		{
-			"name": "Parallax Mapping",
-			"type": TYPE_NIL,
-			"hint_string": "parallax_",
-			"usage": PROPERTY_USAGE_GROUP,
-		},
-		{
-			"name": "parallax_enabled",
-			"type": TYPE_BOOL,
-			"usage": PROPERTY_USAGE_DEFAULT,
-		},
-		{
-			"name": "parallax_depth",
-			"type": TYPE_FLOAT,
-			"usage": PROPERTY_USAGE_DEFAULT,
-		},
+	
 		{
 			"name": "Maps",
 			"type": TYPE_NIL,

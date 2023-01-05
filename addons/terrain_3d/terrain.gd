@@ -31,12 +31,12 @@ var _update_pending: bool = false
 
 @export_group("LOD", "lod_")
 
-@export_range(1,16) var lod_count: int = 5 :
+@export_range(1,16) var lod_count: int = 4 :
 	set = set_lod_count
-@export_enum("32:32", "64:64", "128:128", "256:256") var lod_size: int = 32 :
+@export_enum("32:32", "64:64", "128:128", "256:256") var lod_size: int = 64 :
 	set = set_lod_size
-@export_range(0.0,1.0) var lod_bias: float = 0.2 :
-	set = set_lod_bias
+@export_range(0.0,512.0) var lod_distance: float = 92 :
+	set = set_lod_distance
 
 @export_group("Material", "surface_")
 
@@ -62,9 +62,11 @@ var particle_mask_texture: Texture2D
 @export_flags_3d_physics var collision_mask: int = 1
 
 var physics_body: StaticBody3D
-var mesh: TerrainGridMesh
-var grid: Array[RID]
+var meshes: Array[TerrainGridMesh]
+var grid: Array[Dictionary]
 var camera: Camera3D
+
+var _previous_camera_position: Vector3
 
 func _init():
 	set_notify_transform(true)
@@ -88,15 +90,28 @@ func _process(delta):
 		else:
 			camera = get_viewport().get_camera_3d()
 	else:
-		var camera_position = camera.global_transform.origin * Vector3(1,0,1)
+		var camera_position = camera.global_transform.origin
+		var distance_traveled: float = _previous_camera_position.distance_to(camera_position)
+		
+		if distance_traveled > _MIN_TRAVEL_DISTANCE:
+			_previous_camera_position = camera_position
+			
+			for cell in grid:
+				
+				var cell_pos: Vector3 = cell.transform.origin
+				var distance: float = (cell_pos.distance_to(camera_position))
+				var lod = min(int(distance) / lod_distance, lod_count - 1)
+				var mesh = meshes[lod].get_rid()
+				
+				RenderingServer.instance_set_base(cell.rid, mesh)
 		
 		for emitter in particle_emitters:
-			emitter.global_transform.origin = camera_position
+			emitter.global_transform.origin = camera_position * Vector3(1,0,1)
 			
 func set_visible(value: bool):
 	super(value)
-	for i in grid:
-		RenderingServer.instance_set_visible(i, value)
+	for cell in grid:
+		RenderingServer.instance_set_visible(cell.rid, value)
 				
 func set_size(value: int):
 	if value != size:
@@ -130,12 +145,9 @@ func set_lod_count(value: int):
 		if !_update_pending:
 			call_deferred("update")
 			
-func set_lod_bias(value: float):
-	if value != lod_bias:
-		lod_bias = value
-		if !_update_pending:
-			for i in grid:
-				RenderingServer.instance_geometry_set_lod_bias(i, lod_bias)
+func set_lod_distance(value: float):
+	if value != lod_distance:
+		lod_distance = value
 		
 func set_particle_draw_distance(value: int):
 	particle_draw_distance = value
@@ -173,7 +185,9 @@ func set_material(material: TerrainMaterial3D):
 		surface_material.call_deferred("set_size", size)
 		
 	call_deferred("emit_signal", "material_changed")
-	mesh.surface_set_material(0, surface_material)
+	
+	for mesh in meshes:
+		mesh.surface_set_material(0, surface_material)
 	
 	update_configuration_warnings()
 	
@@ -266,35 +280,49 @@ func update():
 	var side: int = size / lod_size
 	var scenario: RID = get_world_3d().get_scenario()
 	
-	mesh = TerrainGridMesh.new(float(lod_size), lod_count)
-	mesh.surface_set_material(0, surface_material)
+	var previous_subdv: int = 1
+	var subdv: int = lod_size
+	
+	for lod in lod_count:
+		
+		var mesh = TerrainGridMesh.new(float(lod_size), subdv)
+		mesh.surface_set_material(0, surface_material)
+		meshes.push_back(mesh)
+		
+		previous_subdv *= 2
+		subdv = (lod_size / previous_subdv)
 	
 	for x in side:
 		for z in side:
-			var instance: RID = RenderingServer.instance_create2(mesh.get_rid(), scenario)
+			var instance: RID = RenderingServer.instance_create2(meshes[meshes.size() - 1].get_rid(), scenario)
 			var pos = Vector3(x - (side / 2), 0, z - (side / 2)) * lod_size + offset
 			var t: Transform3D = Transform3D(Basis(), pos)
 			
 			RenderingServer.instance_set_transform(instance, t)
-			RenderingServer.instance_geometry_set_lod_bias(instance, lod_bias)
 			
-			grid.push_back(instance)
+			var cell: Dictionary = {
+				"rid" = instance,
+				"transform" = t
+			}
+			
+			grid.push_back(cell)
 			
 	update_aabb()
 	_update_pending = false
 	
 ## Clear all chunk instances.
 func clear():
-	for i in grid:
-		RenderingServer.free_rid(i)
+	for cell in grid:
+		RenderingServer.free_rid(cell.rid)
 	grid.clear()
 	
 ## Updates each chunk's [AABB] to match the terrain height.
 func update_aabb():
-	for i in grid:
+	for cell in grid:
 		var aabb_size: Vector3 = Vector3(lod_size+2, height, lod_size+2)
 		var aabb: AABB = AABB(Vector3(-lod_size/2, -2, -lod_size/2), aabb_size)
-		RenderingServer.instance_set_custom_aabb(i, aabb)
+		aabb = aabb.grow(8.0)
+		RenderingServer.instance_set_custom_aabb(cell.rid, aabb)
 		
 ## Creates a missing or updates current [StaticBody] with [HeightMapShape3D] and applies existing heightmap to it.
 func update_collision():
@@ -367,119 +395,101 @@ func _get_property_list():
 
 class TerrainGridMesh extends ArrayMesh:
 
-	func _init(size: float, lod_count: int):
-		
-		lod_count -= 1
+	func _init(size: float, subdivision: int):
 		
 		var vertices: PackedVector3Array = PackedVector3Array()
-		var indices: Array[PackedInt32Array] = []
+		var indices: PackedInt32Array = PackedInt32Array()
 
 		var index: int = 0
-		var subdv = size
+		var subdv = float(subdivision)
 		var ofs = Vector3(size,0.0,size) / 2.0
-		var previous_subdv = 1.0
-
-		var count = lod_count
-
-		while count >= 0:
-			var lod_indices: PackedInt32Array = PackedInt32Array()
+		
 			# top
-			for y in subdv:
-				for x in subdv:
-					vertices.append(Vector3(x / subdv * size, 0.0, y / subdv * size) - ofs)
-					vertices.append(Vector3(x / subdv * size + size / subdv, 0.0, y / subdv * size) - ofs)
-					vertices.append(Vector3(x / subdv * size, 0.0, y / subdv * size + size / subdv) - ofs)
-					vertices.append(Vector3(x / subdv * size, 0.0, y / subdv * size + size / subdv) - ofs)
-					vertices.append(Vector3(x / subdv * size + size / subdv, 0.0, y / subdv * size) - ofs)
-					vertices.append(Vector3(x / subdv * size + size / subdv, 0.0, y / subdv * size + size / subdv) - ofs)
-					lod_indices.append(index)
-					lod_indices.append(index + 1)
-					lod_indices.append(index + 2)
-					lod_indices.append(index + 3)
-					lod_indices.append(index + 4)
-					lod_indices.append(index + 5)
-					index += 6;
-			# front
-			for x in subdv:
-				vertices.append(Vector3(x / subdv * size, -1, 0) - ofs)
-				vertices.append(Vector3(x / subdv * size + size / subdv, -1, 0) - ofs)
-				vertices.append(Vector3(x / subdv * size, 0, 0) - ofs)
-				vertices.append(Vector3(x / subdv * size, 0, 0) - ofs)
-				vertices.append(Vector3(x / subdv * size + size / subdv, -1, 0) - ofs)
-				vertices.append(Vector3(x / subdv * size + size / subdv, 0, 0) - ofs)
-				lod_indices.append(index)
-				lod_indices.append(index + 1)
-				lod_indices.append(index + 2)
-				lod_indices.append(index + 3)
-				lod_indices.append(index + 4)
-				lod_indices.append(index + 5)
+		for y in subdivision:
+			for x in subdivision:
+				vertices.append(Vector3(x / subdv * size, 0.0, y / subdv * size) - ofs)
+				vertices.append(Vector3(x / subdv * size + size / subdv, 0.0, y / subdv * size) - ofs)
+				vertices.append(Vector3(x / subdv * size, 0.0, y / subdv * size + size / subdv) - ofs)
+				vertices.append(Vector3(x / subdv * size, 0.0, y / subdv * size + size / subdv) - ofs)
+				vertices.append(Vector3(x / subdv * size + size / subdv, 0.0, y / subdv * size) - ofs)
+				vertices.append(Vector3(x / subdv * size + size / subdv, 0.0, y / subdv * size + size / subdv) - ofs)
+				indices.append(index)
+				indices.append(index + 1)
+				indices.append(index + 2)
+				indices.append(index + 3)
+				indices.append(index + 4)
+				indices.append(index + 5)
 				index += 6;
+		# front
+		for x in subdivision:
+			vertices.append(Vector3(x / subdv * size, -1, 0) - ofs)
+			vertices.append(Vector3(x / subdv * size + size / subdv, -1, 0) - ofs)
+			vertices.append(Vector3(x / subdv * size, 0, 0) - ofs)
+			vertices.append(Vector3(x / subdv * size, 0, 0) - ofs)
+			vertices.append(Vector3(x / subdv * size + size / subdv, -1, 0) - ofs)
+			vertices.append(Vector3(x / subdv * size + size / subdv, 0, 0) - ofs)
+			indices.append(index)
+			indices.append(index + 1)
+			indices.append(index + 2)
+			indices.append(index + 3)
+			indices.append(index + 4)
+			indices.append(index + 5)
+			index += 6;
 				
 			# back
-			for x in subdv:
-				vertices.append(Vector3(x / subdv * size + size / subdv, 0, size) - ofs)
-				vertices.append(Vector3(x / subdv * size + size / subdv, -1, size) - ofs)
-				vertices.append(Vector3(x / subdv * size, 0, size) - ofs)
-				vertices.append(Vector3(x / subdv * size, 0, size) - ofs)
-				vertices.append(Vector3(x / subdv * size + size / subdv, -1, size) - ofs)
-				vertices.append(Vector3(x / subdv * size, -1, size) - ofs)
-				lod_indices.append(index)
-				lod_indices.append(index + 1)
-				lod_indices.append(index + 2)
-				lod_indices.append(index + 3)
-				lod_indices.append(index + 4)
-				lod_indices.append(index + 5)
-				index += 6;
-				
-			# right
-			for x in subdv:
-				vertices.append(Vector3(0, 0, x / subdv * size + size / subdv) - ofs)
-				vertices.append(Vector3(0, -1, x / subdv * size + size / subdv) - ofs)
-				vertices.append(Vector3(0, 0, x / subdv * size) - ofs)
-				vertices.append(Vector3(0, 0, x / subdv * size) - ofs)
-				vertices.append(Vector3(0, -1, x / subdv * size + size / subdv) - ofs)
-				vertices.append(Vector3(0, -1, x / subdv * size) - ofs)
-				lod_indices.append(index)
-				lod_indices.append(index + 1)
-				lod_indices.append(index + 2)
-				lod_indices.append(index + 3)
-				lod_indices.append(index + 4)
-				lod_indices.append(index + 5)
-				index += 6;
+		for x in subdivision:
+			vertices.append(Vector3(x / subdv * size + size / subdv, 0, size) - ofs)
+			vertices.append(Vector3(x / subdv * size + size / subdv, -1, size) - ofs)
+			vertices.append(Vector3(x / subdv * size, 0, size) - ofs)
+			vertices.append(Vector3(x / subdv * size, 0, size) - ofs)
+			vertices.append(Vector3(x / subdv * size + size / subdv, -1, size) - ofs)
+			vertices.append(Vector3(x / subdv * size, -1, size) - ofs)
+			indices.append(index)
+			indices.append(index + 1)
+			indices.append(index + 2)
+			indices.append(index + 3)
+			indices.append(index + 4)
+			indices.append(index + 5)
+			index += 6;
+			
+		# right
+		for x in subdivision:
+			vertices.append(Vector3(0, 0, x / subdv * size + size / subdv) - ofs)
+			vertices.append(Vector3(0, -1, x / subdv * size + size / subdv) - ofs)
+			vertices.append(Vector3(0, 0, x / subdv * size) - ofs)
+			vertices.append(Vector3(0, 0, x / subdv * size) - ofs)
+			vertices.append(Vector3(0, -1, x / subdv * size + size / subdv) - ofs)
+			vertices.append(Vector3(0, -1, x / subdv * size) - ofs)
+			indices.append(index)
+			indices.append(index + 1)
+			indices.append(index + 2)
+			indices.append(index + 3)
+			indices.append(index + 4)
+			indices.append(index + 5)
+			index += 6;
 				
 			# left
-			for x in subdv:
-				vertices.append(Vector3(size, -1, x / subdv * size) - ofs)
-				vertices.append(Vector3(size, -1, x / subdv * size + size / subdv) - ofs)
-				vertices.append(Vector3(size, 0, x / subdv * size) - ofs)
-				vertices.append(Vector3(size, 0, x / subdv * size) - ofs)
-				vertices.append(Vector3(size, -1, x / subdv * size + size / subdv) - ofs)
-				vertices.append(Vector3(size, 0, x / subdv * size + size / subdv) - ofs)
-				lod_indices.append(index)
-				lod_indices.append(index + 1)
-				lod_indices.append(index + 2)
-				lod_indices.append(index + 3)
-				lod_indices.append(index + 4)
-				lod_indices.append(index + 5)
-				index += 6;
-					
-			previous_subdv *= 2
-			subdv = (size / previous_subdv)
-			indices.append(lod_indices)
-			
-			count -= 1
+		for x in subdivision:
+			vertices.append(Vector3(size, -1, x / subdv * size) - ofs)
+			vertices.append(Vector3(size, -1, x / subdv * size + size / subdv) - ofs)
+			vertices.append(Vector3(size, 0, x / subdv * size) - ofs)
+			vertices.append(Vector3(size, 0, x / subdv * size) - ofs)
+			vertices.append(Vector3(size, -1, x / subdv * size + size / subdv) - ofs)
+			vertices.append(Vector3(size, 0, x / subdv * size + size / subdv) - ofs)
+			indices.append(index)
+			indices.append(index + 1)
+			indices.append(index + 2)
+			indices.append(index + 3)
+			indices.append(index + 4)
+			indices.append(index + 5)
+			index += 6;
 		
-		var arrays = []
+		var arrays: Array = []
 		arrays.resize(Mesh.ARRAY_MAX)
 		arrays[Mesh.ARRAY_VERTEX] = vertices
-		arrays[Mesh.ARRAY_INDEX] = indices[0]
-		var blend_shapes = []
+		arrays[Mesh.ARRAY_INDEX] = indices
 		
-		var lods = {}
-		for i in lod_count:
-			lods[float(i+1)] = indices[i + 1]
-		
-		add_surface_from_arrays(RenderingServer.PRIMITIVE_TRIANGLES, arrays, [], lods)
+		add_surface_from_arrays(RenderingServer.PRIMITIVE_TRIANGLES, arrays)
 	
 
 class TerrainUtil extends Object:

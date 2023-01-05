@@ -16,12 +16,10 @@ uniform sampler2D terrain_splatmap_02 : filter_linear_mipmap_anisotropic, repeat
 uniform sampler2D terrain_splatmap_03 : filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D terrain_splatmap_04 : filter_linear_mipmap_anisotropic, repeat_disable;
 
-uniform sampler2DArray texture_array_albedo : source_color, filter_linear_mipmap_anisotropic;
-uniform sampler2DArray texture_array_normal : filter_linear_mipmap_anisotropic, hint_normal;
-uniform sampler2DArray texture_array_orm : filter_linear_mipmap_anisotropic;
+uniform sampler2DArray texture_array_albedo : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2DArray texture_array_normal : hint_roughness_normal, filter_linear_mipmap_anisotropic, repeat_enable;
 
 uniform int texture_array_normal_max;
-uniform int texture_array_orm_max;
 
 uniform vec3 texture_uv_scale_array[16];
 uniform vec4 texture_color_array[16];
@@ -51,8 +49,7 @@ void vertex(){
 	NORMAL = get_normal(UV2);
 	TANGENT = cross(NORMAL, vec3(0,0,1));
 	BINORMAL = cross(NORMAL, TANGENT);
-	
-	camera_distance_fade = smoothstep(100, 150, distance(INV_VIEW_MATRIX[3].xyz, world_vertex));
+	camera_distance_fade = smoothstep(92, 128, distance(INV_VIEW_MATRIX[3].xyz, world_vertex));
 }
 
 vec4 depth_blend(vec4 a_value, float a_bump, vec4 b_value, float b_bump, float t) {
@@ -80,41 +77,25 @@ vec2 parallax_mapping(vec2 uv, vec3 view, float height){
 	return uv - view.xy * (1.0 - height) * parallax_depth * 0.02;  
 }
 
-vec2 rotate(vec2 v, float cosa, float sina) {
-	return vec2(cosa * v.x - sina * v.y, sina * v.x + cosa * v.y);
+vec2 hash2D2D (vec2 s){
+	return fract(sin(mod(vec2(dot(s, vec2(127.1,311.7)), dot(s, vec2(269.5,183.3))), 3.14159))*43758.5453);
 }
 
-vec4 tex(vec2 uv, float index, out vec4 out_normal, out vec4 out_orm){
-	float frequency = 2.0;
-	float sharpness = 0.7;
-	
-	vec2 uv2 = rotate(uv, cos(PI*0.2), sin(PI*0.6));
-	
-	float t = 1.1 + 0.5
-		* sin(uv2.x * frequency + sin(uv.x) * 2.0) 
-		* cos(uv2.y * frequency + sin(uv.y) * 2.0);
-	t = smoothstep(sharpness, 2.0 - sharpness, t);
-	
-	vec4 col0 = texture(texture_array_albedo, vec3(uv, index));
-	vec4 col1 = texture(texture_array_albedo, vec3(uv2, index));
-	
-	out_normal = vec4(0.5);
-	out_orm = vec4(1,1,0,1);
-	if (camera_distance_fade < 0.9){
+vec4 stex(float index, vec2 uv[3], mat2 dd, vec3 weight, out vec4 out_normal){
+	out_normal = vec4(0.5, 0.5, 1.0, 1.0);
+	if (camera_distance_fade < 0.99){
 		if (texture_array_normal_max >= int(index)){
-			vec4 a = texture(texture_array_normal, vec3(uv, index));
-			vec4 b = texture(texture_array_normal, vec3(uv2, index));
-			out_normal = mix(depth_blend(a, col0.a, b, col1.a, t), out_normal, camera_distance_fade);
-		}
-		
-		if (texture_array_orm_max >= int(index)){
-			vec4 a = texture(texture_array_orm, vec3(uv, index));
-			vec4 b = texture(texture_array_orm, vec3(uv2, index));
-			out_orm = mix(depth_blend(a, col0.a, b, col1.a, t), out_orm, camera_distance_fade);
+			out_normal = (textureGrad(texture_array_normal,vec3(uv[0], index),dd[0],dd[1])*weight.x) +
+			(textureGrad(texture_array_normal,vec3(uv[1], index),dd[0],dd[1])*weight.y) +
+			(textureGrad(texture_array_normal,vec3(uv[2], index),dd[0],dd[1])*weight.z);
 		}
 	}
-
-	return depth_blend(col0, col0.a, col1, col1.a, t);
+	
+	vec4 col = (textureGrad(texture_array_albedo,vec3(uv[0], index),dd[0],dd[1])*weight.x) +
+	(textureGrad(texture_array_albedo,vec3(uv[1], index),dd[0],dd[1])*weight.y) +
+	(textureGrad(texture_array_albedo,vec3(uv[2], index),dd[0],dd[1])*weight.z);
+	
+	return col;
 }
 
 void get_splat_weights(vec2 uv, out vec4 out_high_indices, out vec4 out_high_weights) {
@@ -167,42 +148,58 @@ void get_splat_weights(vec2 uv, out vec4 out_high_indices, out vec4 out_high_wei
 }
 
 void fragment() {
-
-	vec3 normal = vec3(0.5);
-	vec3 color = vec3(1.0);
-	vec3 orm = vec3(1,1,0);
+	
+	vec3 normal = vec3(0.5, 0.5, 1.0);
+	vec3 color = vec3(0.5);
 	
 	if (terrain_use_grid){
 		color = texture(terrain_grid, UV*terrain_grid_scale).rgb;
 	} else {
+	
+//		if (camera_distance_fade < 0.99){
+		vec2 skewUV = mat2(vec2(1.0 , 0.0), vec2(-0.57735027 , 1.15470054)) * UV * 3.464;
+		vec2 vxID = vec2(floor(skewUV));
+		vec3 barry = vec3(fract(skewUV), 0);
+		barry.z = 1.0-barry.x-barry.y;
+		
+		mat4 bw_vx = barry.z>0.0?
+			mat4(vec4(vxID,0.0,0.0),vec4((vxID+vec2(0.0,1.0)),0.0,0.0),vec4(vxID+vec2(1.0,0.0),0,0),vec4(barry.zyx,0)):
+			mat4(vec4(vxID+vec2(1.0,1.0),0.0,0.0),vec4((vxID+vec2(1.0,0.0)),0.0,0.0),vec4(vxID+vec2(0.0,1.0),0,0),vec4(-barry.z,1.0-barry.y,1.0-barry.x,0));
+			
+		mat2 dd = mat2(dFdx(UV),dFdy(UV));
+		vec2 uvx3[3] = { UV+hash2D2D(bw_vx[0].xy), UV+hash2D2D(bw_vx[1].xy), UV+hash2D2D(bw_vx[2].xy) };
+		vec3 sw = bw_vx[3].xyz;
+
+		vec4 ab0, ab1, ab2, ab3;
+		vec4 nr0, nr1, nr2, nr3;
+		
 		vec4 indices;
 		vec4 weights;
 		get_splat_weights(UV2, indices, weights);
-		
-		vec4 ab0, ab1, ab2, ab3;
-		vec4 nr0, nr1, nr2, nr3;
-		vec4 orm0, orm1, orm2, orm3;
-		
-//		vec3 view_dir = normalize(normalize(-VERTEX)*mat3(TANGENT,-BINORMAL,NORMAL));
+
 		int int_indices[4] = {int(indices.x), int(indices.y), int(indices.z), int(indices.w)};
 		
-		ab0 = tex(UV*texture_uv_scale_array[int_indices[0]].xy, indices.x, nr0, orm0) * texture_color_array[int_indices[0]];
-		ab1 = tex(UV*texture_uv_scale_array[int_indices[1]].xy, indices.y, nr1, orm1) * texture_color_array[int_indices[1]];
-		ab2 = tex(UV*texture_uv_scale_array[int_indices[2]].xy, indices.z, nr2, orm2) * texture_color_array[int_indices[2]];
-		ab3 = tex(UV*texture_uv_scale_array[int_indices[3]].xy, indices.w, nr3, orm3) * texture_color_array[int_indices[3]];
-	
+		ab0 = stex(indices.x, uvx3, dd, sw, nr0) * texture_color_array[int_indices[0]];
+		ab1 = stex(indices.y, uvx3, dd, sw, nr1) * texture_color_array[int_indices[1]];
+		ab2 = stex(indices.z, uvx3, dd, sw, nr2) * texture_color_array[int_indices[2]];
+		ab3 = stex(indices.w, uvx3, dd, sw, nr3) * texture_color_array[int_indices[3]];
+		
 		vec4 w = get_depth_blended_weights(weights, vec4(ab0.a, ab1.a, ab2.a, ab3.a));
 		float w_sum = (w.r + w.g + w.b + w.a);
-	
+		
 		color = (w.r * ab0.rgb + w.g * ab1.rgb + w.b * ab2.rgb + w.a * ab3.rgb) / w_sum;
-		normal = (w.r * nr0.raa + w.g * nr1.raa + w.b * nr2.raa + w.a * nr3.raa) / w_sum; // RAAAAAAAAAAAAAA
-		orm = (w.r * orm0.rgb + w.g * orm1.rgb + w.b * orm2.rgb + w.a * orm3.rgb) / w_sum;
+		normal = (w.r * nr0.rgg + w.g * nr1.rgg + w.b * nr2.rgg + w.a * nr3.rgg) / w_sum;
+		ROUGHNESS = (w.r * nr0.b + w.g * nr1.b + w.b * nr2.b + w.a * nr3.b) / w_sum;
+		AO = (w.r * nr0.a + w.g * nr1.a + w.b * nr2.a + w.a * nr3.a) / w_sum;
+		
+//		color = mix((w.r * ab0.rgb + w.g * ab1.rgb + w.b * ab2.rgb + w.a * ab3.rgb) / w_sum, color, camera_distance_fade);
+//		normal = mix((w.r * nr0.rgg + w.g * nr1.rgg + w.b * nr2.rgg + w.a * nr3.rgg) / w_sum, normal, camera_distance_fade);
+//		ROUGHNESS = mix((w.r * nr0.b + w.g * nr1.b + w.b * nr2.b + w.a * nr3.b) / w_sum, 1.0, camera_distance_fade);
+//		AO = mix((w.r * nr0.a + w.g * nr1.a + w.b * nr2.a + w.a * nr3.a) / w_sum, 1.0, camera_distance_fade);
+//		}
 	}
 	
-	ALBEDO = color;
-	AO = orm.r;
-	ROUGHNESS = orm.g;
-	METALLIC = orm.b;
+	ALBEDO = color.rgb;
 	NORMAL = mat3(VIEW_MATRIX) * get_normal(UV2);
 	NORMAL_MAP = normal;
 	NORMAL_MAP_DEPTH = 1.0;
