@@ -207,6 +207,9 @@ func update_material():
 ## Update or creates an array of [GPUParticles3D].
 func update_particles():
 	
+	# TODO. Using old splatmap stuff. Need to convert to use controlmap.
+	return
+	
 	if particle_mesh_array.is_empty():
 		particle_mesh_array.append(Array())
 		particle_mesh_array.append(Array())

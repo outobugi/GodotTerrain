@@ -1,10 +1,11 @@
-[gd_scene load_steps=6 format=3 uid="uid://c5uv4atbb75k8"]
+[gd_scene load_steps=7 format=3 uid="uid://c5uv4atbb75k8"]
 
 [ext_resource type="Script" path="res://addons/terrain_3d/ui/tools.gd" id="1_6lpwp"]
 [ext_resource type="Texture2D" uid="uid://g84p30cseaq1" path="res://addons/terrain_3d/icons/icon_height_brush.svg" id="2_42756"]
 [ext_resource type="ButtonGroup" uid="uid://dmi8ebigmrcfy" path="res://addons/terrain_3d/ui/tool_group.tres" id="2_wfina"]
 [ext_resource type="Texture2D" uid="uid://ccji2p2kgqa0m" path="res://addons/terrain_3d/icons/icon_brush.svg" id="3_vhfbk"]
 [ext_resource type="Texture2D" uid="uid://ml6dwqda86im" path="res://addons/terrain_3d/icons/icon_multimesh.svg" id="5_11jqx"]
+[ext_resource type="Texture2D" uid="uid://g5qow6rig4b6" path="res://addons/terrain_3d/icons/icon_warning.svg" id="6_ec00k"]
 
 [node name="Tools" type="VBoxContainer"]
 custom_minimum_size = Vector2(228, 0)
@@ -181,6 +182,19 @@ text = "Particles"
 horizontal_alignment = 1
 vertical_alignment = 1
 
+[node name="HBoxContainer2" type="HBoxContainer" parent="MeshLayers/VBox"]
+layout_mode = 2
+alignment = 1
+
+[node name="TextureRect" type="TextureRect" parent="MeshLayers/VBox/HBoxContainer2"]
+layout_mode = 2
+texture = ExtResource("6_ec00k")
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="MeshLayers/VBox/HBoxContainer2"]
+layout_mode = 2
+text = "Disabled. Not working."
+
 [node name="Container" type="ScrollContainer" parent="MeshLayers/VBox"]
 layout_mode = 2
 size_flags_vertical = 3
@@ -189,3 +203,6 @@ size_flags_vertical = 3
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MeshLayers/VBox"]
+layout_mode = 2

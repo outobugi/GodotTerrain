@@ -12,13 +12,6 @@ var pending_collision_update: bool = false
 var toolbar: Control
 var gpu_painter: Node
 
-var color_channels: Array[Color] = [
-	Color(1,0,0,0),
-	Color(0,1,0,0),
-	Color(0,0,1,0),
-	Color(0,0,0,1),
-]
-
 func _enter_tree():
 	toolbar = TOOLBAR_UI.instantiate()
 	toolbar.hide()
@@ -43,8 +36,10 @@ func _edit(object: Variant):
 		
 		if object == current_terrain:
 			return
+			
+		current_terrain = object
 		
-		load_material_layers()
+		load_layers()
 		load_meshes()
 		
 		gpu_painter.attach_terrain_material(object.get_material())
@@ -53,9 +48,7 @@ func _edit(object: Variant):
 			object.connect("material_changed", _terrain_on_material_changed)
 		if !object.is_connected("resolution_changed", _terrain_on_resolution_changed):
 			object.connect("resolution_changed", _terrain_on_resolution_changed)
-			
-		current_terrain = object
-	
+
 func _clear():
 	if is_terrain_valid():
 		if current_terrain.is_connected("material_changed", _terrain_on_material_changed):
@@ -104,7 +97,7 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent):
 								paint_height(uv)
 								pending_collision_update = true
 							if toolbar.tool_mode == toolbar.ToolMode.TEXTURE:
-								paint_splat(uv)
+								paint_control(uv)
 							
 				if was_pressed and !mouse_is_pressed:
 					if pending_collision_update:
@@ -119,7 +112,7 @@ func is_terrain_valid():
 
 func _terrain_on_material_changed():
 	gpu_painter.attach_terrain_material(current_terrain.get_material())
-	load_material_layers()
+	load_layers()
 	
 func _terrain_on_resolution_changed():
 	gpu_painter.update_resolution(current_terrain.get_size(), current_terrain.get_height())
@@ -136,12 +129,13 @@ func is_in_bounds(pixel_position: Vector2i, max_position: Vector2i):
 	var less_than_max: bool =  pixel_position.x < max_position.x and pixel_position.y < max_position.y
 	return more_than_min and less_than_max
 	
-func load_material_layers():
+func load_layers():
 	var layers: Array[TerrainLayerMaterial3D] = []
 	if is_terrain_valid():
 		if current_terrain.has_material():
-			layers = current_terrain.get_material().get_material_layers()
-	toolbar.load_material_layers(layers, on_material_layer_changed)
+			
+			layers = current_terrain.get_material().get_layer_materials()
+	toolbar.load_layers(layers, on_layer_changed)
 	
 func load_meshes():
 	var meshes: Array[Array]
@@ -149,11 +143,11 @@ func load_meshes():
 		meshes = current_terrain.get_particle_meshes()
 	toolbar.load_meshes(meshes, on_particle_mesh_changed)
 
-func on_material_layer_changed(material: TerrainLayerMaterial3D, layer: int):
+func on_layer_changed(material: TerrainLayerMaterial3D, layer: int):
 	if is_terrain_valid():
 		if current_terrain.has_material():
-			current_terrain.get_material().set_material_layer(material, layer)
-		call_deferred("load_material_layers")
+			current_terrain.get_material().set_layer_material(material, layer)
+		call_deferred("load_layers")
 		
 func on_particle_mesh_changed(mesh: Mesh, layer: int, index: int):
 	if is_terrain_valid():
@@ -195,43 +189,46 @@ func paint_height(uv: Vector2):
 	heightmap.set_image(heightmap_img)
 	gpu_painter.refresh_normalmap()
 	
-func paint_splat(uv: Vector2):
+func paint_control(uv: Vector2):
+	var controlmap: ImageTexture = current_terrain.get_material().get_controlmap()
+	var controlmap_img: Image = controlmap.get_image()
+	var controlmap_size: Vector2i = controlmap.get_size()
 	
 	var brush_size = toolbar.get_brush_size()
-	var brush_opacity = toolbar.get_brush_opacity()
 	var brush_shape = toolbar.get_brush_shape()
 	var brush_shape_size = brush_shape.get_size()
-	
-	var brush_color = color_channels[wrapi(toolbar.get_material_layer(), 0, 4)]
-	var splat_index = (toolbar.get_material_layer()) / 4
+	var brush_opacity = toolbar.get_brush_opacity()
+
+	var layer_index: int = toolbar.get_material_layer()
+	# Max is 255 (256 because 0 is first)
 	
 	var rand_rotation = PI * randf()
+	
+	for x in brush_size:
+		for y in brush_size:
+			var brush_center = brush_size / 2
 
-	for i in TerrainMaterial3D.SPLATMAP_MAX:
-		
-		var splatmap_img: Image = current_terrain.get_material().get_splatmap(i).get_image()
-		var splatmap_size: Vector2i = splatmap_img.get_size()
-		
-		var new_color = Color(0,0,0,0)
-		if i == splat_index:
-			new_color = brush_color
-		
-		for x in brush_size:
-			for y in brush_size:
-				var brush_center = brush_size / 2
-				var brush_shape_uv: Vector2 = Vector2(x,y) / brush_size
-				brush_shape_uv = rotate_uv(brush_shape_uv, rand_rotation)
-				var brush_pixel: Vector2i = Vector2i(brush_shape_uv * Vector2(brush_shape_size))
-				brush_pixel = brush_pixel.clamp(Vector2i.ZERO, brush_shape_size - Vector2i.ONE)
-				
-				var brush_offset: Vector2i = Vector2i(x, y) - Vector2i(brush_center, brush_center)
-				var brush_position: Vector2i = Vector2i(Vector2(splatmap_size) * uv)
-				var pixel_position: Vector2i = brush_position + brush_offset
-				
-				if is_in_bounds(pixel_position, splatmap_size):
-					var alpha: float = brush_shape.get_pixelv(brush_pixel).r * brush_opacity
-					var color: Color = splatmap_img.get_pixelv(pixel_position).lerp(new_color, alpha)
+			var brush_shape_uv: Vector2 = Vector2(x,y) / brush_size
+			brush_shape_uv = rotate_uv(brush_shape_uv, rand_rotation)
+			var brush_pixel: Vector2i = Vector2i(brush_shape_uv * Vector2(brush_shape_size))
+			brush_pixel = brush_pixel.clamp(Vector2i.ZERO, brush_shape_size - Vector2i.ONE)
+			
+			var brush_offset: Vector2i = Vector2i(x, y) - Vector2i(brush_center, brush_center)
+			var brush_position: Vector2i = Vector2i(Vector2(controlmap_size) * uv)
+			var pixel_position: Vector2i = (brush_position + brush_offset)
+			
+			if is_in_bounds(pixel_position, controlmap_size):
+				var alpha: float = brush_shape.get_pixelv(brush_pixel).r
+				var index_mask: float = 1.0 if alpha > 0.5 else 0.0
 					
-					splatmap_img.set_pixelv(pixel_position, color)
-		
-		current_terrain.get_material().get_splatmap(i).set_image(splatmap_img)
+				var color = controlmap_img.get_pixelv(pixel_position)
+				
+				var weight: int = int(lerp(color.g, brush_opacity, alpha) * 255.0)
+				var index: int = int(lerp(color.r * 255.0, float(layer_index), index_mask))
+				
+				var index_color: Color = Color8(index, weight, 0, 255)
+				
+				controlmap_img.set_pixelv(pixel_position, index_color)
+	
+	current_terrain.get_material().get_controlmap().set_image(controlmap_img)
+	

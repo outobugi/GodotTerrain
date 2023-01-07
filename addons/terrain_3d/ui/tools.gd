@@ -24,8 +24,8 @@ var material_layer: int = 0
 var editor_interface: EditorInterface
 
 @onready var brush_height_control = get_node("BrushHeight")
-
 @onready var brush_size_slider = get_node("BrushSize/Slider")
+@onready var brush_opacity_name = get_node("BrushOpacity/Label")
 @onready var brush_opacity_slider = get_node("BrushOpacity/Slider")
 @onready var brush_height_slider = brush_height_control.get_node("Slider")
 @onready var brush_size_value = get_node("BrushSize/Value")
@@ -135,8 +135,10 @@ func set_tool_mode(toggle: bool, mode: ToolMode):
 	match mode:
 		ToolMode.HEIGHT:
 			brush_height_control.show()
+			brush_opacity_name.set_text("Opacity")
 		ToolMode.TEXTURE:
 			material_layers_control.show()
+			brush_opacity_name.set_text("Hardness")
 		ToolMode.PARTICLE:
 			mesh_layers_control.show()
 			
@@ -185,19 +187,19 @@ func _on_material_layer_selected(id: int):
 			layer.set_selected(false)
 	material_layer = id
 	
-func clear_material_layers():
+func clear_layers():
 	for node in material_layers_list.get_children():
 		if node is MaterialLayerContainer:
 			node.queue_free()
 			
-func clear_mesh_layers():
+func clear_meshes():
 	for node in mesh_layers_list.get_children():
 		if node is MeshLayerContainer:
 			node.queue_free()
 	
-func load_material_layers(data: Array[TerrainLayerMaterial3D], callback: Callable):
+func load_layers(data: Array[TerrainLayerMaterial3D], callback: Callable):
 	
-	clear_material_layers()
+	clear_layers()
 	
 	var layer_count: int = 0
 	
@@ -214,7 +216,6 @@ func load_material_layers(data: Array[TerrainLayerMaterial3D], callback: Callabl
 			layer.connect("inspected", _on_resource_inspected)
 			layer.connect("selected", _on_material_layer_selected)
 			layer.connect("changed", callback)
-			
 
 			material_layers_list.add_child(layer)
 
@@ -225,7 +226,7 @@ func load_material_layers(data: Array[TerrainLayerMaterial3D], callback: Callabl
 		material_layers_list.add_child(empty_layer)
 		
 func load_meshes(data: Array[Array], callback: Callable):
-	clear_mesh_layers()
+	clear_meshes()
 	
 	var layer_count: int = 0
 	
