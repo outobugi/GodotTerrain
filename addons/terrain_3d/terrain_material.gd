@@ -15,10 +15,7 @@ const _DEFAULT_GRID_TEXTURE: Texture2D = preload("res://addons/terrain_3d/temp/g
 var _editor_map_normalmap: ViewportTexture
 var _editor_map_heightmap: ViewportTexture
 
-const LAYERS_MAX: int = 16
-const SPLATMAPS: PackedStringArray = ["terrain_splatmap_01","terrain_splatmap_02","terrain_splatmap_03","terrain_splatmap_04"]
-const SPLATMAP_SIZE: int = 1024
-const SPLATMAP_MAX: int = 4
+const LAYERS_MAX: int = 256
 
 ## Enables inspecting all of the data used in the material.
 @export var advanced: bool = false :
@@ -215,18 +212,15 @@ func _update_values():
 func _update_textures():
 	var albedo_textures: Array[Texture2D]
 	var normal_textures: Array[Texture2D]
-	var orm_textures: Array[Texture2D]
 	
 	for material in layer_materials:
 		var alb: Texture2D = material.get_texture(TerrainLayerMaterial3D.TextureParam.TEXTURE_ALBEDO)
 		var nor: Texture2D = material.get_texture(TerrainLayerMaterial3D.TextureParam.TEXTURE_NORMAL)
-		var orm: Texture2D = material.get_texture(TerrainLayerMaterial3D.TextureParam.TEXTURE_ORM)
 		albedo_textures.push_back(alb)
 		normal_textures.push_back(nor)
-		orm_textures.push_back(orm)
-	
-	layer_texture_array_albedo = _convert_to_albedo_array(albedo_textures)
-	layer_texture_array_normal = _convert_to_normal_array(normal_textures, orm_textures)
+		
+	layer_texture_array_albedo = _convert_array(albedo_textures)
+	layer_texture_array_normal = _convert_array(normal_textures)
 
 	RenderingServer.material_set_param(get_rid(), "texture_array_albedo", layer_texture_array_albedo.get_rid())
 	RenderingServer.material_set_param(get_rid(), "texture_array_normal", layer_texture_array_normal.get_rid())
@@ -253,80 +247,14 @@ func _update():
 	_update_controlmap()
 	_update_layers()
 
-func _convert_to_albedo_array(array_albedo: Array) -> Texture2DArray:
+func _convert_array(array_albedo: Array) -> Texture2DArray:
 	
 	var img_arr: Array[Image]
+	
 	for tex in array_albedo:
 		if tex != null:
 			var img: Image = tex.get_image()
-			
-			if img.is_compressed():
-				img.decompress()
-			
-			img.generate_mipmaps()
-			img.convert(Image.FORMAT_RGBA8)
-				
-#			img.compress(Image.COMPRESS_BPTC, Image.COMPRESS_SOURCE_GENERIC)
-			
 			img_arr.push_back(img)
-			
-	var tex_arr = Texture2DArray.new()
-	if !img_arr.is_empty():
-		tex_arr.create_from_images(img_arr)
-		
-	return tex_arr
-	
-func _convert_to_normal_array(array_normal: Array, array_orm: Array) -> Texture2DArray:
-	
-	var img_arr: Array[Image]
-	
-	for i in array_normal.size():
-		
-		var nor: Texture2D = array_normal[i]
-#		var orm: Texture2D
-#		if array_orm.size() > i+1:
-#			orm = array_orm[i]
-			
-		if nor != null:
-			var img: Image = nor.get_image()
-			
-			if img.is_compressed():
-				img.decompress()
-			
-			img.generate_mipmaps()
-				
-			img.convert(Image.FORMAT_RGBA8)
-#			img.compress(Image.COMPRESS_BPTC, Image.COMPRESS_SOURCE_NORMAL)
-			
-			img_arr.push_back(img)
-			
-#			var img_orm: Image
-#			var img_orm_size: Vector2i
-#
-#			if orm != null:
-#				img_orm = orm.get_image()
-#				img_orm_size = img_orm.get_size()
-#				if img_orm.is_compressed():
-#					img_orm.decompress()
-#
-#			var output_img: Image = Image.create(img_nor_size.x, img_nor_size.y, true, Image.FORMAT_RGBA8)
-#
-#			for x in img_nor_size.x:
-#				for y in img_nor_size.y:
-#					var uv: Vector2 = Vector2(x, y) / Vector2(img_nor_size)
-#					var n: Color = img_nor.get_pixel(x, y)
-#					var new_pixel = Color(n.r, n.a, 1.0, 1.0)
-#
-#					if img_orm:
-#						var o: Color = img_orm.get_pixelv(Vector2i(uv*Vector2(img_orm_size)))
-#						new_pixel.b = o.g # Roughness
-#						new_pixel.a = o.r # AO
-#
-#					output_img.set_pixel(x, y, new_pixel)
-#
-#			output_img.generate_mipmaps()
-#
-#			img_arr.push_back(output_img)
 			
 	var tex_arr = Texture2DArray.new()
 	if !img_arr.is_empty():

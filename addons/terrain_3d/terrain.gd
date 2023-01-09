@@ -73,17 +73,14 @@ func _init():
 	if !is_inside_tree():
 		_update_pending = true
 		call_deferred("update")
-		
-func _exit_tree():
-	clear()
-	set_process(false)
 	
 func _get_configuration_warnings():
 	if !has_material():
 		var string_arr: PackedStringArray = ["Terrain has no material. Painting disabled."]
 		return string_arr
-		
+
 func _process(delta):
+	
 	if !camera:
 		if Engine.is_editor_hint():
 			camera = TerrainUtil.get_camera()
@@ -108,11 +105,6 @@ func _process(delta):
 		for emitter in particle_emitters:
 			emitter.global_transform.origin = camera_position * Vector3(1,0,1)
 			
-func set_visible(value: bool):
-	super(value)
-	for cell in grid:
-		RenderingServer.instance_set_visible(cell.rid, value)
-				
 func set_size(value: int):
 	if value != size:
 		size = value
@@ -179,7 +171,12 @@ func get_particle_meshes():
 	
 ## Sets the [TerrainMaterial3D] to all LOD meshes.
 func set_material(material: TerrainMaterial3D):
+	
 	surface_material = material
+	
+	if !surface_material.get_path().is_valid_filename():
+		push_warning("Material is not saved to disk. Save it as .res or .material!")
+	
 	if surface_material:
 		surface_material.call_deferred("set_height", height)
 		surface_material.call_deferred("set_size", size)
@@ -188,7 +185,7 @@ func set_material(material: TerrainMaterial3D):
 	
 	for mesh in meshes:
 		mesh.surface_set_material(0, surface_material)
-	
+		
 	update_configuration_warnings()
 	
 ## Returns the assigned [TerrainMaterial3D]
@@ -206,9 +203,6 @@ func update_material():
 
 ## Update or creates an array of [GPUParticles3D].
 func update_particles():
-	
-	# TODO. Using old splatmap stuff. Need to convert to use controlmap.
-	return
 	
 	if particle_mesh_array.is_empty():
 		particle_mesh_array.append(Array())
@@ -234,8 +228,6 @@ func update_particles():
 		
 		# Why does it need to divided twice by the density? only way I got it to keep the area the same
 		var instance_count: int = instance_area / particle_density / particle_density
-		
-		var splat_channels: Array[Color] = [Color(1,0,0,0), Color(0,1,0,0), Color(0,0,1,0), Color(0,0,0,1)]
 		
 		var index: int = 0
 		for emitter in particle_emitters:
@@ -265,9 +257,9 @@ func update_particles():
 				material.set_shader_parameter("seed", index)
 				material.set_shader_parameter("instance_count", instance_count)
 				material.set_shader_parameter("instance_density", particle_density)
-				material.set_shader_parameter("terrain_splatmap", surface_material.get_splatmap(layer / 4))
-				var splat_channel: Color = splat_channels[wrapi(layer, 0, 4)]
-				material.set_shader_parameter("terrain_splatmap_channel", splat_channel)
+				material.set_shader_parameter("terrain_controlmap", surface_material.get_controlmap())
+				
+				material.set_shader_parameter("material_index", float(layer))
 			index += 1
 		
 ## Updates all of the terrain. Calls every [i]update_[/i] function.
@@ -281,7 +273,8 @@ func update():
 	
 	var offset = Vector3(1,0,1) * (lod_size / 2)
 	var side: int = size / lod_size
-	var scenario: RID = get_world_3d().get_scenario()
+	var world: World3D = get_parent().get_world_3d()
+	var scenario: RID = get_parent().get_world_3d().get_scenario()
 	
 	var previous_subdv: int = 1
 	var subdv: int = lod_size
@@ -297,10 +290,12 @@ func update():
 	
 	for x in side:
 		for z in side:
-			var instance: RID = RenderingServer.instance_create2(meshes[meshes.size() - 1].get_rid(), scenario)
+			var instance: RID = RenderingServer.instance_create()
 			var pos = Vector3(x - (side / 2), 0, z - (side / 2)) * lod_size + offset
 			var t: Transform3D = Transform3D(Basis(), pos)
 			
+			RenderingServer.instance_set_base(instance, meshes[meshes.size() - 1].get_rid())
+			RenderingServer.instance_set_scenario(instance, scenario)
 			RenderingServer.instance_set_transform(instance, t)
 			
 			var cell: Dictionary = {
@@ -377,9 +372,36 @@ func update_collision():
 		
 func _notification(what):
 	
-	if what == NOTIFICATION_TRANSFORM_CHANGED:
-		# Lock the transform
-		global_transform = Transform3D.IDENTITY
+	var hide_terrain: bool = false
+	var visibility_changed: bool = false
+	
+	match what:
+		NOTIFICATION_TRANSFORM_CHANGED:
+			# Lock the transform
+			global_transform = Transform3D.IDENTITY
+		NOTIFICATION_PREDELETE:
+			clear()
+		NOTIFICATION_VISIBILITY_CHANGED:
+			visibility_changed = true
+		NOTIFICATION_ENTER_TREE:
+			set_process(true)
+		NOTIFICATION_EXIT_TREE:
+			set_process(false)
+		NOTIFICATION_ENTER_WORLD:
+			hide_terrain = false
+			visibility_changed = true
+		NOTIFICATION_EXIT_WORLD:
+			hide_terrain = true
+			
+	# Scenario seems to not do anything? Switching scene tabs does not hide the terrain or am I missing something?
+	# Workaround
+	
+	if hide_terrain or visibility_changed:
+		var show: bool = visible
+		if hide_terrain:
+			show = false
+		for cell in grid:
+			RenderingServer.instance_set_visible(cell.rid, show)
 		
 func _get_property_list():
 	var property_list: Array = [

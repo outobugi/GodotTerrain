@@ -3,9 +3,9 @@ extends Material
 class_name TerrainLayerMaterial3D
 @icon("res://addons/terrain_3d/icons/icon_terrain_layer_material.svg")
 
-## Material used in [TerrainMaterial3D]. Stripped down version of [ORMMaterial3D].
+## Material used in [TerrainMaterial3D].
 ##
-## Easier interface for editing [TerrainMaterial3D].
+## Mostly used as an interface for editing [TerrainMaterial3D].
 
 signal texture_changed()
 signal value_changed()
@@ -13,7 +13,6 @@ signal value_changed()
 enum TextureParam{
 	TEXTURE_ALBEDO,
 	TEXTURE_NORMAL,
-	TEXTURE_ORM
 }
 
 var albedo_color: Color = Color.WHITE :
@@ -21,20 +20,17 @@ var albedo_color: Color = Color.WHITE :
 	
 var albedo_texture: Texture2D :
 	set(value):
-		albedo_texture = value
-		set_texture(TextureParam.TEXTURE_ALBEDO, value)
+		if _texture_is_valid(value):
+			albedo_texture = value
+			set_texture(TextureParam.TEXTURE_ALBEDO, value)
 
 var normal_texture: Texture2D :
 	set(value):
-		normal_texture = value
-		set_texture(TextureParam.TEXTURE_NORMAL, value)
+		if _texture_is_valid(value):
+			normal_texture = value
+			set_texture(TextureParam.TEXTURE_NORMAL, value)
 
 var normal_scale: float
-
-var orm_texture: Texture2D :
-	set(value):
-		orm_texture = value
-		set_texture(TextureParam.TEXTURE_ORM, value)
 
 var uv_scale: Vector3 = Vector3.ONE:
 	set = set_uv_scale
@@ -86,14 +82,13 @@ func set_texture(param: TextureParam, texture: Texture2D):
 	
 	if texture:
 		rid = texture.get_rid()
-		
+
 	match param:
 		TextureParam.TEXTURE_ALBEDO:
 			string_param = "albedo_texture"
 		TextureParam.TEXTURE_NORMAL:
 			string_param = "normal_texture"
-		TextureParam.TEXTURE_ORM:
-			string_param = "normal_texture"
+			_update_shader()
 
 	RenderingServer.material_set_param(get_rid(), string_param, rid)
 	emit_changed()
@@ -105,9 +100,16 @@ func get_texture(param: TextureParam):
 			return albedo_texture
 		TextureParam.TEXTURE_NORMAL:
 			return normal_texture
-		TextureParam.TEXTURE_ORM:
-			return orm_texture
 	return null
+	
+func _texture_is_valid(texture: Texture2D):
+	if texture:
+		var format: int = texture.get_image().get_format()
+		var format_name: String = ClassDB.class_get_enum_constants("Image", "Format")[format]
+		if texture.get_image().get_format() != Image.FORMAT_DXT5:
+			printerr("Invalid format. " + "(" + format_name + ")" + " Expected DXT5 RGBA8.")
+			return false
+	return true
 	
 func _get_shader_mode():
 	return Shader.MODE_SPATIAL
@@ -120,7 +122,7 @@ func _update_shader():
 	var code: String = "shader_type spatial;\n"
 	code += "uniform vec4 albedo_color = vec4(1.0);\n"
 	code += "uniform sampler2D albedo_texture : source_color,filter_linear_mipmap_anisotropic,repeat_enable;\n"
-	code += "uniform sampler2D normal_texture : hint_normal,filter_linear_mipmap_anisotropic,repeat_enable;\n"
+	code += "uniform sampler2D normal_texture : filter_linear_mipmap_anisotropic,repeat_enable;\n"
 	code += "uniform float normal_scale : hint_range(-16.0, 16.0, 0.1);\n"
 	code += "uniform vec3 uv_scale = vec3(1.0,1.0,1.0);\n"
 	code += "uniform bool uv_anti_tile;\n\n"
@@ -130,8 +132,11 @@ func _update_shader():
 	code += "void fragment(){\n"
 	code += "	ALBEDO=texture(albedo_texture, UV).rgb * albedo_color.rgb;\n"
 	code += "	vec4 normal_map =texture(normal_texture, UV);\n"
-	code += "	NORMAL_MAP=normal_map.rgb;\n"
-	code += "	ROUGHNESS=normal_map.a;\n"
+	
+	if normal_texture:
+		code += "	NORMAL_MAP=normal_map.rgb;\n"
+		code += "	ROUGHNESS=normal_map.a;\n"
+	
 	code += "}\n"
 	
 	_shader = RenderingServer.shader_create()
@@ -171,24 +176,11 @@ func _get_property_list():
 			"hint_string": "Texture2D",
 			"usage": PROPERTY_USAGE_DEFAULT,
 		},
-#		{
-#			"name": "normal_scale",
-#			"type": TYPE_FLOAT,
-#			"hint": PROPERTY_HINT_RANGE,
-#			"hint_string": "-16, 16",
-#			"usage": PROPERTY_USAGE_DEFAULT,
-#		},
-{
-			"name": "ORM",
-			"type": TYPE_NIL,
-			"hint_string": "orm_",
-			"usage": PROPERTY_USAGE_GROUP,
-		},
 		{
-			"name": "orm_texture",
-			"type": TYPE_OBJECT,
-			"hint": PROPERTY_HINT_RESOURCE_TYPE,
-			"hint_string": "Texture2D",
+			"name": "normal_scale",
+			"type": TYPE_FLOAT,
+			"hint": PROPERTY_HINT_RANGE,
+			"hint_string": "-16, 16",
 			"usage": PROPERTY_USAGE_DEFAULT,
 		},
 		{
@@ -202,11 +194,11 @@ func _get_property_list():
 			"type": TYPE_VECTOR3,
 			"usage": PROPERTY_USAGE_DEFAULT,
 		},
-#		{
-#			"name": "uv_anti_tile",
-#			"type": TYPE_BOOL,
-#			"usage": PROPERTY_USAGE_DEFAULT,
-#		},
+		{
+			"name": "uv_anti_tile",
+			"type": TYPE_BOOL,
+			"usage": PROPERTY_USAGE_DEFAULT,
+		},
 	]
 	return property_list
 	

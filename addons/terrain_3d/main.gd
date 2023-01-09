@@ -1,7 +1,6 @@
 @tool
 extends EditorPlugin
 
-const TOOLBAR_UI: PackedScene = preload("res://addons/terrain_3d/ui/tools.tscn")
 const GPUPainter: Script = preload("res://addons/terrain_3d/gpu_painter.gd")
 
 var current_terrain: Terrain3D
@@ -9,14 +8,12 @@ var is_active: bool = false
 
 var mouse_is_pressed: bool = false
 var pending_collision_update: bool = false
-var toolbar: Control
+var toolbar: TerrainToolUI
 var gpu_painter: Node
 
 func _enter_tree():
-	toolbar = TOOLBAR_UI.instantiate()
+	toolbar = TerrainToolUI.new()
 	toolbar.hide()
-	toolbar.editor_interface = get_editor_interface()
-	toolbar.call_deferred("init_toolbar")
 	add_control_to_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_SIDE_RIGHT, toolbar)
 	gpu_painter = GPUPainter.new()
 	add_child(gpu_painter)
@@ -39,7 +36,7 @@ func _edit(object: Variant):
 			
 		current_terrain = object
 		
-		load_layers()
+		load_materials()
 		load_meshes()
 		
 		gpu_painter.attach_terrain_material(object.get_material())
@@ -93,10 +90,10 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent):
 						if current_terrain.has_material():
 							var uv: Vector2 = get_uv_from(ray_data.position)
 							
-							if toolbar.tool_mode == toolbar.ToolMode.HEIGHT:
+							if toolbar.current_tool == toolbar.Tool.HEIGHT:
 								paint_height(uv)
 								pending_collision_update = true
-							if toolbar.tool_mode == toolbar.ToolMode.TEXTURE:
+							if toolbar.current_tool == toolbar.Tool.TEXTURE:
 								paint_control(uv)
 							
 				if was_pressed and !mouse_is_pressed:
@@ -112,7 +109,7 @@ func is_terrain_valid():
 
 func _terrain_on_material_changed():
 	gpu_painter.attach_terrain_material(current_terrain.get_material())
-	load_layers()
+	load_materials()
 	
 func _terrain_on_resolution_changed():
 	gpu_painter.update_resolution(current_terrain.get_size(), current_terrain.get_height())
@@ -129,31 +126,40 @@ func is_in_bounds(pixel_position: Vector2i, max_position: Vector2i):
 	var less_than_max: bool =  pixel_position.x < max_position.x and pixel_position.y < max_position.y
 	return more_than_min and less_than_max
 	
-func load_layers():
+func load_materials():
 	var layers: Array[TerrainLayerMaterial3D] = []
 	if is_terrain_valid():
 		if current_terrain.has_material():
-			
 			layers = current_terrain.get_material().get_layer_materials()
-	toolbar.load_layers(layers, on_layer_changed)
+	toolbar.load_materials(layers, on_material_changed)
 	
 func load_meshes():
 	var meshes: Array[Array]
 	if is_terrain_valid():
 		meshes = current_terrain.get_particle_meshes()
-	toolbar.load_meshes(meshes, on_particle_mesh_changed)
+	toolbar.load_meshes(meshes, on_mesh_changed)
 
-func on_layer_changed(material: TerrainLayerMaterial3D, layer: int):
+func on_material_changed(material: TerrainLayerMaterial3D, layer: int, inspect: bool):
 	if is_terrain_valid():
-		if current_terrain.has_material():
-			current_terrain.get_material().set_layer_material(material, layer)
-		call_deferred("load_layers")
-		
-func on_particle_mesh_changed(mesh: Mesh, layer: int, index: int):
+		if !inspect:
+			if current_terrain.has_material():
+				current_terrain.get_material().set_layer_material(material, layer)
+			call_deferred("load_materials")
+			if !material:
+				get_editor_interface().inspect_object(current_terrain, "", true)
+		else:
+			get_editor_interface().inspect_object(material, "", true)
+	
+func on_mesh_changed(mesh: Mesh, layer: int, index: int, inspect: bool = false):
 	if is_terrain_valid():
-		if current_terrain.has_material():
-			current_terrain.set_particle_mesh(mesh, layer, index)
-		call_deferred("load_meshes")
+		if !inspect:
+			if current_terrain.has_material():
+				current_terrain.set_particle_mesh(mesh, layer, index)
+			call_deferred("load_meshes")
+			if !mesh:
+				get_editor_interface().inspect_object(current_terrain, "", true)
+		else:
+			get_editor_interface().inspect_object(mesh, "", true)
 		
 func paint_height(uv: Vector2):
 	var heightmap: ImageTexture = current_terrain.get_material().get_heightmap()
@@ -163,8 +169,8 @@ func paint_height(uv: Vector2):
 	var brush_size = toolbar.get_brush_size()
 	var brush_shape = toolbar.get_brush_shape()
 	var brush_shape_size = brush_shape.get_size()
-	var brush_height = toolbar.get_brush_height()
 	var brush_opacity = toolbar.get_brush_opacity()
+	var brush_flow = toolbar.get_brush_flow()
 	
 	var rand_rotation = PI * randf()
 	
@@ -182,9 +188,23 @@ func paint_height(uv: Vector2):
 			var pixel_position: Vector2i = (brush_position + brush_offset)
 			
 			if is_in_bounds(pixel_position, heightmap_size):
-				var alpha: float = brush_shape.get_pixelv(brush_pixel).r * brush_opacity
-				var color: Color = heightmap_img.get_pixelv(pixel_position).lerp(Color.WHITE * brush_height, alpha)
-				heightmap_img.set_pixelv(pixel_position, color)
+				var alpha: float = brush_shape.get_pixelv(brush_pixel).r
+				var source: float = heightmap_img.get_pixelv(pixel_position).r
+				var target: float = source
+				
+				if toolbar.current_mode == toolbar.Mode.HEIGHT_ADD:
+					target = lerp(source, source + (brush_opacity * alpha), brush_flow)
+					
+				if toolbar.current_mode == toolbar.Mode.HEIGHT_SUBTRACT:
+					target = lerp(source, source - (brush_opacity * alpha), brush_flow)
+					
+				if toolbar.current_mode == toolbar.Mode.HEIGHT_MULTIPLY:
+					target = lerp(source, source * ((brush_opacity * alpha) + 1.0), brush_flow)
+					
+				if toolbar.current_mode == toolbar.Mode.HEIGHT_LEVEL:
+					target = lerp(source, brush_opacity, alpha * brush_flow)
+					
+				heightmap_img.set_pixelv(pixel_position, Color(clamp(target, 0, 1), 0, 0, 1))
 	
 	heightmap.set_image(heightmap_img)
 	gpu_painter.refresh_normalmap()
@@ -198,6 +218,7 @@ func paint_control(uv: Vector2):
 	var brush_shape = toolbar.get_brush_shape()
 	var brush_shape_size = brush_shape.get_size()
 	var brush_opacity = toolbar.get_brush_opacity()
+	var brush_flow = toolbar.get_brush_flow()
 
 	var layer_index: int = toolbar.get_material_layer()
 	# Max is 255 (256 because 0 is first)
@@ -207,7 +228,6 @@ func paint_control(uv: Vector2):
 	for x in brush_size:
 		for y in brush_size:
 			var brush_center = brush_size / 2
-
 			var brush_shape_uv: Vector2 = Vector2(x,y) / brush_size
 			brush_shape_uv = rotate_uv(brush_shape_uv, rand_rotation)
 			var brush_pixel: Vector2i = Vector2i(brush_shape_uv * Vector2(brush_shape_size))
@@ -220,15 +240,536 @@ func paint_control(uv: Vector2):
 			if is_in_bounds(pixel_position, controlmap_size):
 				var alpha: float = brush_shape.get_pixelv(brush_pixel).r
 				var index_mask: float = 1.0 if alpha > 0.5 else 0.0
+				var source_color: Color = controlmap_img.get_pixelv(pixel_position)
+				var target_color: Color = source_color # Color(layer1, layer2, blend, unused)
+				
+				if toolbar.current_mode == toolbar.Mode.TEXTURE_REPLACE:
+					var index: int = lerp( int(source_color.r * 255), layer_index, index_mask)
+					target_color.r = float(index) / 255.0
+					target_color.b = lerp(source_color.b, 0.0, alpha*brush_flow*index_mask) # Weight
 					
-				var color = controlmap_img.get_pixelv(pixel_position)
-				
-				var weight: int = int(lerp(color.g, brush_opacity, alpha) * 255.0)
-				var index: int = int(lerp(color.r * 255.0, float(layer_index), index_mask))
-				
-				var index_color: Color = Color8(index, weight, 0, 255)
-				
-				controlmap_img.set_pixelv(pixel_position, index_color)
+				if toolbar.current_mode == toolbar.Mode.TEXTURE_BLEND:
+					var index: int = lerp(int(source_color.g * 255), layer_index, index_mask)
+					target_color.g = float(index) / 255.0
+					target_color.b = lerp(source_color.b, brush_opacity, alpha*brush_flow*index_mask) # Weight
+
+				controlmap_img.set_pixelv(pixel_position, target_color)
 	
 	current_terrain.get_material().get_controlmap().set_image(controlmap_img)
 	
+
+# UI
+
+class TerrainToolUI extends MarginContainer:
+
+	const BRUSH_PREVIEW_MATERIAL: ShaderMaterial = preload("res://addons/terrain_3d/ui/brush_preview.material")
+	const ICON_SCULPT: Texture = preload("res://addons/terrain_3d/icons/icon_height_brush.svg")
+	const ICON_PAINT: Texture = preload("res://addons/terrain_3d/icons/icon_brush.svg")
+	const ICON_PARTICLE: Texture = preload("res://addons/terrain_3d/icons/icon_multimesh.svg")
+
+	enum Tool {
+		HEIGHT,
+		TEXTURE,
+		PARTICLE,
+		NONE
+	}
+
+	enum Mode {
+		HEIGHT_ADD,
+		HEIGHT_SUBTRACT,
+		HEIGHT_MULTIPLY,
+		HEIGHT_LEVEL,
+		TEXTURE_REPLACE,
+		TEXTURE_BLEND,
+		PARTICLE_MASK,
+		MAX
+	}
+
+	const MAX_BRUSH_SIZE: int = 512
+
+	var current_tool: Tool = Tool.NONE
+	var current_mode: Mode = Mode.MAX
+	var current_material_layer: int = 0
+
+	var tool_buttons: HBoxContainer
+	var brush_mode_option: BrushToolControl
+	var brush_size_slider: BrushToolControl
+	var brush_opacity_slider: BrushToolControl
+	var brush_flow_slider: BrushToolControl
+	var brush_shape_list: BrushToolControl
+
+	var brush_shape_button_group: ButtonGroup = ButtonGroup.new()
+	var tool_button_group: ButtonGroup = ButtonGroup.new()
+
+	var material_layers: LayerListContainer
+	var mesh_layers: LayerListContainer
+
+	func _init():
+		
+		custom_minimum_size.x = 230
+		set("theme_override_constants/margin_right", 5)
+		
+		var vbox: VBoxContainer = VBoxContainer.new()
+		vbox.size_flags_horizontal = SIZE_EXPAND_FILL
+		add_child(vbox)
+		
+		brush_size_slider = BrushToolControl.new(BrushToolControl.Type.SLIDER, "Size", "m", MAX_BRUSH_SIZE)
+		brush_opacity_slider = BrushToolControl.new(BrushToolControl.Type.SLIDER, "Opacity", "%")
+		brush_flow_slider = BrushToolControl.new(BrushToolControl.Type.SLIDER, "Flow", "%")
+		brush_shape_list = BrushToolControl.new(BrushToolControl.Type.BUTTON_GRID, "Shape")
+		brush_mode_option = BrushToolControl.new(BrushToolControl.Type.OPTION, "Mode")
+		
+		tool_buttons = HBoxContainer.new()
+		
+		var tool_height: Button = Button.new()
+		tool_height.icon = ICON_SCULPT
+		tool_height.text = " Sculpt"
+		tool_buttons.add_child(tool_height)
+		var tool_texture: Button = Button.new()
+		tool_texture.icon = ICON_PAINT
+		tool_texture.text = " Paint"
+		tool_buttons.add_child(tool_texture)
+		var tool_particle: Button = Button.new()
+		tool_particle.icon = ICON_PARTICLE
+		tool_particle.text = " Detail"
+		tool_buttons.add_child(tool_particle)
+
+		for button in tool_buttons.get_children():
+			button.toggle_mode = true
+			button.button_group = tool_button_group
+			button.size_flags_horizontal = SIZE_EXPAND_FILL
+			
+		material_layers = LayerListContainer.new("Layers")
+		mesh_layers = LayerListContainer.new("Particles")
+		
+		tool_height.connect("toggled", set_tool.bind(Tool.HEIGHT))
+		tool_texture.connect("toggled", set_tool.bind(Tool.TEXTURE))
+		tool_particle.connect("toggled", set_tool.bind(Tool.PARTICLE))
+		tool_height.set_pressed(true)
+		set_tool(true, Tool.HEIGHT)
+		
+		brush_mode_option.get_type_control().connect("item_selected", set_mode)
+		
+		vbox.add_child(tool_buttons)
+		vbox.add_child(HSeparator.new())
+		vbox.add_child(brush_mode_option)
+		vbox.add_child(HSeparator.new())
+		vbox.add_child(brush_shape_list)
+		vbox.add_child(brush_size_slider)
+		vbox.add_child(brush_opacity_slider)
+		vbox.add_child(brush_flow_slider)
+		vbox.add_child(material_layers)
+		vbox.add_child(mesh_layers)
+		
+		load_brushes()
+		
+		call_deferred("laod_default_values")
+		
+	func laod_default_values():
+		set_brush_size(64)
+		set_brush_opacity(50)
+		set_brush_flow(25)
+
+	func load_brushes():
+		var path: String = "res://addons/terrain_3d/brush/"
+		var brush_directory: DirAccess = DirAccess.open(path)
+		var is_first: bool = true
+		
+		for button in brush_shape_list.get_type_control().get_children():
+			button.queue_free()
+			
+		var brush_count: int = 0
+			
+		brush_directory.list_dir_begin()
+		var brush_name = brush_directory.get_next()
+		while brush_name:
+			if !brush_directory.current_is_dir():
+				if brush_name.ends_with(".png"):
+					var brush: Image = load(path+brush_name)
+					var texture: ImageTexture = ImageTexture.create_from_image(brush)
+					var brush_button: Button = Button.new()
+				
+					brush_button.toggle_mode = true
+					brush_button.action_mode = 0
+					brush_button.button_group = brush_shape_button_group
+					brush_button.custom_minimum_size = Vector2(36,36)
+					brush_button.size_flags_vertical = SIZE_SHRINK_CENTER
+					brush_button.expand_icon = true
+					brush_button.icon = texture
+					brush_button.material = BRUSH_PREVIEW_MATERIAL
+
+					if is_first:
+						brush_button.call_deferred("set_pressed", true)
+						is_first = false
+						
+					brush_shape_list.get_type_control().add_child(brush_button)
+					brush_count += 1
+					
+			brush_name = brush_directory.get_next()
+
+		if brush_count == 0:
+			print("No brushes found! Please check the brush folder in addons/terrain_3d/brush")
+
+	func set_tool(toggle: bool, tool: Tool):
+		
+		if current_tool == tool:
+			return
+		
+		if toggle:
+			current_tool = tool
+
+			material_layers.hide()
+			mesh_layers.hide()
+			
+			var options: OptionButton = brush_mode_option.get_type_control()
+			options.clear()
+
+			match tool:
+				Tool.HEIGHT:
+					
+					for mode in Mode.MAX:
+						var mode_name = Mode.keys()[mode]
+						if mode_name.begins_with("HEIGHT_"):
+							mode_name = mode_name.trim_prefix("HEIGHT_")
+							options.add_item(mode_name.to_pascal_case(), mode)
+							
+					set_mode(options.get_item_index(Mode.HEIGHT_ADD))
+					
+				Tool.TEXTURE:
+					material_layers.show()
+					
+					for mode in Mode.MAX:
+						var mode_name = Mode.keys()[mode]
+						if mode_name.begins_with("TEXTURE_"):
+							mode_name = mode_name.trim_prefix("TEXTURE_")
+							options.add_item(mode_name.to_pascal_case(), mode)
+							
+					set_mode(options.get_item_index(Mode.TEXTURE_REPLACE))
+							
+				Tool.PARTICLE:
+					mesh_layers.show()
+					
+				
+	func set_mode(index: int):
+		
+		var mode: Mode = brush_mode_option.get_type_control().get_item_id(index)
+
+		current_mode = mode
+
+		brush_opacity_slider.get_label().set_text("Opacity")
+		brush_opacity_slider.show()
+		brush_flow_slider.show()
+		
+		match mode:
+			Mode.HEIGHT_ADD:
+				pass
+			Mode.HEIGHT_SUBTRACT:
+				pass
+			Mode.HEIGHT_MULTIPLY:
+				pass
+			Mode.HEIGHT_LEVEL:
+				brush_opacity_slider.get_label().set_text("Height")
+			Mode.TEXTURE_REPLACE:
+				brush_flow_slider.hide()
+				brush_opacity_slider.hide()
+			Mode.TEXTURE_BLEND:
+				brush_opacity_slider.get_label().set_text("Blend")
+		
+		
+	func get_mode():
+		return brush_mode_option.get_type_control().get_selected()
+				
+	func set_brush_size(value):
+		brush_size_slider.get_type_control().set_value(value)
+		
+	func set_brush_opacity(value):
+		brush_opacity_slider.get_type_control().set_value(value)
+		
+	func set_brush_flow(value):
+		brush_flow_slider.get_type_control().set_value(value)
+		
+	func get_brush_size():
+		return brush_size_slider.get_type_control().get_value()
+		
+	func get_brush_opacity():
+		return brush_opacity_slider.get_type_control().get_value() / 100.0
+	
+	func get_brush_flow():
+		return pow(brush_flow_slider.get_type_control().get_value() / 100.0, 2.2)
+		
+	func get_brush_shape():
+		return brush_shape_button_group.get_pressed_button().get_button_icon().get_image()
+		
+	func get_material_layer():
+		return current_material_layer
+
+	func _on_material_layer_selected(id: int):
+		for layer in material_layers.get_list().get_children():
+			if layer.id != id:
+				layer.set_selected(false)
+		current_material_layer = id
+		
+	func load_materials(data: Array[TerrainLayerMaterial3D], callback: Callable):
+		
+		material_layers.clear()
+		
+		var layer_count: int = 0
+		
+		if !data.is_empty():
+			layer_count = data.size()
+			
+			for i in layer_count:
+				var layer: MaterialLayerContainer = MaterialLayerContainer.new(i)
+				var mat: TerrainLayerMaterial3D = data[i]
+
+				layer.set_layer_data(mat)
+				layer.set_selected(i == current_material_layer)
+		
+				layer.connect("selected", _on_material_layer_selected)
+				layer.connect("changed", callback)
+
+				material_layers.add_layer(layer)
+
+		if layer_count < TerrainMaterial3D.LAYERS_MAX or layer_count == 0:
+			var empty_layer: MaterialLayerContainer = MaterialLayerContainer.new(layer_count)
+			empty_layer.connect("selected", _on_material_layer_selected)
+			empty_layer.connect("changed", callback)
+			material_layers.add_layer(empty_layer)
+			
+	func load_meshes(data: Array[Array], callback: Callable):
+		
+		mesh_layers.clear()
+		
+		var layer_count: int = 0
+		var max_layers: int = 10
+		
+		if !data.is_empty():
+			layer_count = data[0].size()
+			for i in layer_count:
+				var layer: MeshLayerContainer = MeshLayerContainer.new(i, max_layers)
+				var mesh: Mesh = data[0][i]
+				
+				layer.set_layer_data(mesh, data[1][i])
+				layer.connect("changed", callback)
+				
+				mesh_layers.add_layer(layer)
+
+		var empty_layer: MeshLayerContainer = MeshLayerContainer.new(layer_count, max_layers)
+		empty_layer.connect("changed", callback)
+		mesh_layers.add_layer(empty_layer)
+		
+class MaterialLayerContainer extends HBoxContainer:
+	
+	signal selected(id: int)
+	signal changed(layer_material: TerrainLayerMaterial3D, id: int, inspect: bool)
+	
+	var is_selected: bool = false
+	
+	var material_picker: EditorResourcePicker
+	
+	var id: int
+	
+	func _init(layer: int):
+		id = layer
+		material_picker = EditorResourcePicker.new()
+		material_picker.set_base_type("TerrainLayerMaterial3D")
+		material_picker.connect("resource_changed", _on_changed)
+		material_picker.connect("resource_selected", _on_selected)
+		
+		var label = Label.new()
+	
+		label.text = "Layer "+str(id+1)
+		label.size_flags_horizontal = SIZE_EXPAND_FILL
+		label.size_flags_vertical = SIZE_EXPAND_FILL
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		
+		material_picker.size_flags_horizontal = SIZE_EXPAND_FILL
+		size_flags_horizontal = SIZE_EXPAND_FILL
+		
+		add_child(label)
+		add_child(material_picker)
+
+		queue_redraw()
+		
+	func _notification(what):
+		if what == NOTIFICATION_DRAW:
+			if is_selected:
+				var stylebox = get_theme_stylebox("bg_selected", "EditorProperty")
+				draw_style_box(stylebox, Rect2(Vector2.ZERO, get_size()))
+				
+	func _gui_input(event):
+		if event is InputEventMouseButton:
+			if event.button_index == MOUSE_BUTTON_LEFT:
+				emit_signal("selected", id)
+				set_selected(true)
+	
+	func _on_changed(layer_material: Variant):
+		# If texture is cleared, Object#null is passed
+		# which causes an error "Can't convert Object to Object
+		if layer_material == null:
+			layer_material = null
+		emit_signal("changed", layer_material, id, false)
+		
+	func _on_selected(layer_material: Variant, inspect: bool):
+		emit_signal("changed", layer_material, id, true)
+		
+	func set_layer_data(layer_material: TerrainLayerMaterial3D):
+		material_picker.set_edited_resource(layer_material)
+		
+	func set_selected(select: bool):
+		is_selected = select
+		queue_redraw()
+
+class MeshLayerContainer extends HBoxContainer:
+	
+	signal changed(mesh: Mesh, layer: int, id: int)
+	
+	var mesh_picker: EditorResourcePicker
+	var layer_list: OptionButton
+	
+	var id: int
+	
+	func _init(layer: int, max_layers: int):
+		id = layer
+		mesh_picker = EditorResourcePicker.new()
+		mesh_picker.set_base_type("Mesh")
+		mesh_picker.connect("resource_changed", _on_mesh_changed)
+		mesh_picker.connect("resource_selected", _on_selected)
+		
+		layer_list = OptionButton.new()
+		
+		for i in max_layers:
+			layer_list.add_item("Layer " + str(i+1))
+		
+		layer_list.connect("item_selected", _on_layer_changed)
+	
+		layer_list.size_flags_horizontal = SIZE_EXPAND_FILL
+		mesh_picker.size_flags_horizontal = SIZE_EXPAND_FILL
+		size_flags_horizontal = SIZE_EXPAND_FILL
+		
+		add_child(layer_list)
+		add_child(mesh_picker)
+	
+	func _on_mesh_changed(mesh: Variant):
+		if mesh == null:
+			mesh = null
+		var layer = max(0, layer_list.get_selected())
+		emit_signal("changed", mesh, layer, id)
+		
+	func _on_layer_changed(layer: int):
+		var mesh: Variant = mesh_picker.get_edited_resource()
+		if mesh == null:
+			mesh = null
+		emit_signal("changed", mesh, layer, id)
+		
+	func _on_selected(mesh: Variant, inspect: bool):
+		var layer = max(0, layer_list.get_selected())
+		emit_signal("changed", mesh, layer, id, true)
+		
+	func set_layer_data(mesh: Mesh, layer: int):
+		mesh_picker.set_edited_resource(mesh)
+		layer_list._select_int(layer)
+		
+class BrushToolControl extends HBoxContainer:
+	
+	enum Type {
+		SLIDER,
+		OPTION,
+		BUTTON_GRID,
+	}
+	
+	var type: Type
+	var suffix: String
+	
+	func _init(control_type: Type, tool_name: String, value_suffix: String = "", max: float = 100.0):
+		
+		type = control_type
+		suffix = value_suffix
+		
+		var label: Label = Label.new()
+		label.custom_minimum_size.x = 64
+		label.text = tool_name
+		add_child(label)
+		
+		match type:
+			Type.SLIDER:
+				var slider = HSlider.new()
+				slider.max_value = max
+				slider.step = 1.0
+				slider.size_flags_horizontal = SIZE_EXPAND_FILL
+				slider.size_flags_vertical = SIZE_SHRINK_CENTER
+				slider.connect("value_changed", _on_changed)
+				add_child(slider)
+				var value: Label = Label.new()
+				value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+				value.custom_minimum_size.x = 48
+				value.clip_text = true
+				value.text = str(0)
+				add_child(value)
+			Type.OPTION:
+				var option_button: OptionButton = OptionButton.new()
+				option_button.size_flags_horizontal = SIZE_EXPAND_FILL
+				option_button.connect("item_selected", _on_changed)
+				add_child(option_button)
+			Type.BUTTON_GRID:
+				var container: HFlowContainer = HFlowContainer.new()
+				container.size_flags_horizontal = SIZE_EXPAND_FILL
+				container.size_flags_vertical = SIZE_SHRINK_CENTER
+				add_child(container)
+		
+	func _on_changed(variant: Variant):
+		
+		if type == Type.SLIDER:
+			get_child(2).set_text(str(variant)+suffix)
+	
+	func get_type_control() -> Control:
+		return get_child(1)
+		
+	func get_label() -> Label:
+		return get_child(0)
+		
+class LayerListContainer extends PanelContainer:
+	
+	var list: VBoxContainer
+	var label: Label
+	
+	func _init(list_name: String):
+		
+		var vbox: VBoxContainer = VBoxContainer.new()
+		add_child(vbox)
+		label = Label.new()
+		vbox.add_child(label)
+		var scroll: ScrollContainer = ScrollContainer.new()
+		vbox.add_child(scroll)
+		list = VBoxContainer.new()
+		scroll.add_child(list)
+		
+		vbox.size_flags_vertical = SIZE_FILL
+		label.text = list_name
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		scroll.size_flags_vertical = SIZE_EXPAND_FILL
+		list.size_flags_horizontal = SIZE_EXPAND_FILL
+		list.size_flags_vertical = SIZE_EXPAND_FILL
+		
+		size_flags_vertical = SIZE_EXPAND_FILL
+		
+		call_deferred("load_editor_theme")
+		
+	func add_layer(layer: HBoxContainer):
+		list.add_child(layer)
+		
+	func clear():
+		for i in list.get_children():
+			i.queue_free()
+	
+	func load_editor_theme():
+		label.set("theme_override_styles/normal", get_theme_stylebox("bg", "EditorInspectorCategory"))
+		label.set("theme_override_fonts/font", get_theme_font("bold", "EditorFonts"))
+		label.set("theme_override_font_sizes/font_size",get_theme_font_size("bold_size", "EditorFonts"))
+		set("theme_override_styles/panel", get_theme_stylebox("panel", "Panel"))
+	
+	func get_list():
+		return list
+		
+		

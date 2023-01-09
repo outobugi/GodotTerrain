@@ -8,10 +8,10 @@ uniform int instance_density = 1;
 uniform float terrain_height = 0.0;
 uniform float terrain_size = 0.0;
 
-uniform sampler2D terrain_heightmap : filter_linear_mipmap, repeat_disable;
-uniform sampler2D terrain_normalmap : filter_linear_mipmap, repeat_disable;
-uniform sampler2D terrain_splatmap : filter_linear_mipmap, repeat_disable;
-uniform vec4 terrain_splatmap_channel = vec4(0.0);
+uniform sampler2D terrain_heightmap : repeat_disable;
+uniform sampler2D terrain_normalmap : repeat_disable;
+uniform sampler2D terrain_controlmap : repeat_disable;
+uniform float material_index = 0.0;
 
 uniform sampler2D mask_texture : filter_linear_mipmap, repeat_disable;
 
@@ -69,9 +69,9 @@ void process() {
 
 	TRANSFORM[3].y = texture(terrain_heightmap, uv).r * terrain_height;
 	
-	float mask = length(texture(terrain_splatmap, uv) * terrain_splatmap_channel);
+	float current_index = texture(terrain_controlmap, uv).r * 255.0;
 
-	if (mask > 0.5 - (rand_offset*0.05)){
+	if (current_index == material_index){
 		float scale = 1.0;
 		TRANSFORM[0] *= scale;
 		TRANSFORM[1] *= scale;

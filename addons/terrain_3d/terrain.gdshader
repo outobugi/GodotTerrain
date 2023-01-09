@@ -9,15 +9,16 @@ uniform float parallax_depth = 1.0;
 
 uniform sampler2D terrain_heightmap : filter_linear_mipmap, repeat_disable;
 uniform sampler2D terrain_normalmap : filter_linear_mipmap, repeat_disable;
-uniform sampler2D terrain_controlmap : filter_nearest_mipmap_anisotropic, repeat_disable;
+uniform sampler2D terrain_controlmap : filter_linear_mipmap_anisotropic, repeat_disable;
 
 uniform sampler2DArray texture_array_albedo : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2DArray texture_array_normal : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
 
 uniform int texture_array_normal_max;
 
-uniform vec3 texture_uv_scale_array[16];
-uniform vec4 texture_color_array[16];
+uniform vec3 texture_uv_scale_array[256];
+uniform vec3 texture_3d_projection_array[256];
+uniform vec4 texture_color_array[256];
 
 uniform bool terrain_use_grid = true;
 uniform float terrain_grid_scale = 2.0;
@@ -25,14 +26,23 @@ uniform sampler2D terrain_grid : source_color, filter_linear_mipmap_anisotropic;
 
 varying float camera_distance_fade;
 
+vec3 unpack_normal(vec4 rgba) {
+	vec3 n = rgba.xzy * 2.0 - vec3(1.0);
+	n.z *= -1.0;
+	return n;
+}
+
+vec4 pack_normal(vec3 n, float a) {
+	n.z *= -1.0;
+	return vec4((n.xzy + vec3(1.0)) * 0.5, a);
+}
+
 float get_height(vec2 uv){
 	return texture(terrain_heightmap, uv).r * terrain_height;
 }
 
 vec3 get_normal(vec2 uv){
-	vec4 nmap = texture(terrain_normalmap, uv);
-	vec3 n = normalize(nmap.xzy * 2.0 - 1.0);
-	n.z *= -1.0;
+	vec3 n = unpack_normal(texture(terrain_normalmap, uv));
 	return normalize(n);
 }
 
@@ -50,7 +60,7 @@ void vertex(){
 vec4 depth_blend(vec4 a_value, float a_bump, vec4 b_value, float b_bump, float t) { // unsused
 	// https://www.gamasutra.com
 	// /blogs/AndreyMishkinis/20130716/196339/Advanced_Terrain_Texture_Splatting.php
-	float ma = max(a_bump + (1.0 - t), b_bump + t) - 0.15;
+	float ma = max(a_bump + (1.0 - t), b_bump + t) - 0.1;
 	float ba = max(a_bump + (1.0 - t) - ma, 0.0);
 	float bb = max(b_bump + t - ma, 0.0);
 	return (a_value * ba + b_value * bb) / (ba + bb);
@@ -65,61 +75,69 @@ float bbs(float input){
 }
 
 float random(vec2 input){
-	vec4 a= fract(input.xyxy * (2.0f * vec4(1.3442f, 1.0377f, 0.98848f, 0.75775f)) + input.yxyx);
-	float v = fract(dot(a*a, vec4(251.0)));
-	return bbs(v);
+	vec4 a = fract(input.xyxy * (2.0f * vec4(1.3442f, 1.0377f, 0.98848f, 0.75775f)) + input.yxyx);
+	return fract(dot(a*a, vec4(251.0)));
 }
 
 float blend_weights(float weight, float detail){
-	float detailContrast = 2.0;
-	float result = max(0.1 * weight, detailContrast * (weight + detail) + 1.0 - (detail + detailContrast));
-	return pow(result, 4.0);
+	weight = sqrt(weight*0.2);
+	float detailContrast = 4.0f;
+	float result = max(0.1 * weight, detailContrast * (weight + detail) + 1.0f - (detail + detailContrast));
+	return pow(result, 2.0);
 }
 
 vec2 rotate(vec2 v, float cosa, float sina) {
 	return vec2(cosa * v.x - sina * v.y, sina * v.x + cosa * v.y);
 }
 
-vec4 get_material(vec2 uv, vec4 index, vec2 uv_center, float weight, inout float scale, inout vec4 out_normal, in vec3 world_pos, in vec3 world_nor){
-	
-	float weightMod = index.g;
-	weightMod = weightMod * weightMod + 0.1;
-	float rand = random(uv_center);
-	
-	float material = floor(index.r * 255.0 + 0.5);
-	vec2 matUV;
-	
-	float rx = sin(rand);
-	float ry = cos(rand);
-	
-	vec2 rot = normalize(vec2(rx, ry));
+vec4 get_material(vec2 uv, vec4 index, ivec2 uv_center, float weight, inout float scale, inout vec4 out_normal, in vec3 world_pos, in vec3 world_nor){
 
-	vec2 proj = 0.5 * (world_nor.xz / world_nor.y);
-	proj = clamp(floor(proj * 7.0 + 7.25), 0, 15);
-	float projDX = (proj.x - 7.0) / 7.0;
-	float projDY = (proj.y - 7.0) / 7.0;
-	vec3 projF = normalize(vec3(projDX, 0.5, projDY));
-	vec3 projU = normalize(cross(projF, vec3(rot.x, 0.0, rot.y)));
-	vec3 projV = cross(projU, projF);
-
-	matUV.x = dot(projU, world_pos);
-	matUV.y = dot(projV, world_pos);
+	float rand = random(vec2(uv_center)) * TAU;
 	
-	// do we need these?
+	float material = index.r * 255.0;
+	float materialOverlay = index.g * 255.0;
+	float materialBlend = index.b;
+	
+	vec2 rot = normalize(vec2(sin(rand), cos(rand)));
+	
+	vec2 matUV = rotate(uv, rot.x, rot.y) * texture_uv_scale_array[int(material)].xy;
+	
+/////// 3D PROJECTION UV ///////
+//	vec2 proj = 0.5 * (world_nor.xz / world_nor.y);
+//	proj = clamp(floor(proj * 7.0 + 7.25), 0, 15);
+//	float projDX = (proj.x - 7.0) / 7.0;
+//	float projDY = (proj.y - 7.0) / 7.0;
+//	vec3 projF = normalize(vec3(projDX, 0.5, projDY));
+//	vec3 projU = normalize(cross(projF, vec3(rot.x, 0.0, rot.y)));
+//	vec3 projV = cross(projU, projF);
+//	matUV = vec2(dot(projU, world_pos), dot(projV, world_pos));
+//	float projWeight = clamp(dot(projF, world_nor), 0, 1);
+//	weight *= (projWeight * projWeight + 0.0001);
+
 	vec2 ddx = dFdx(matUV);
 	vec2 ddy = dFdy(matUV);
 	
-	vec4 col = textureGrad(texture_array_albedo, vec3(matUV, material), ddx, ddy);
+	vec4 col1 = textureGrad(texture_array_albedo, vec3(matUV, material), ddx, ddy);
+	vec4 col2 = textureGrad(texture_array_albedo, vec3(matUV, materialOverlay), ddx, ddy);
 	
-	float projWeight = clamp(dot(projF, world_nor), 0, 1);
-	weight *= (projWeight * projWeight + 0.0001);
-	weight = blend_weights(sqrt(weight * weightMod), col.a);
+	vec4 albedo = depth_blend(col1, col1.a, col2, col2.a, materialBlend);
 	
-	float w = float(texture_array_normal_max >= int(material));
-	out_normal += mix(textureGrad(texture_array_normal, vec3(matUV, material), ddx, ddy), vec4(0.5, 1.0, 1.0, 0.5), 1.0-w) * weight;
+	vec4 nor1 = textureGrad(texture_array_normal, vec3(matUV, material), ddx, ddy);
+	vec4 nor2 = textureGrad(texture_array_normal, vec3(matUV, materialOverlay), ddx, ddy);
+	
+	float nw = 1.0 - float(texture_array_normal_max >= int(material));
+	vec4 normal = depth_blend(nor1, col1.a, nor2, col2.a, materialBlend);
+	
+	vec3 n = unpack_normal(normal);
+	n.xz = rotate(n.xz, rot.x, -rot.y);
+	normal = pack_normal(n, normal.a);
+	
+	weight = blend_weights(weight, albedo.a);
 
+	out_normal += mix(normal, vec4(0.5, 0.5, 1.0, 1.0), nw) * weight;
 	scale += weight;
-	return col * weight;
+	
+	return albedo * weight;
 }
 
 void fragment() {
@@ -133,44 +151,44 @@ void fragment() {
 	if (terrain_use_grid){
 		color = texture(terrain_grid, UV*terrain_grid_scale).rgb;
 	} else {
-	
+		
 		vec2 texSize = vec2(textureSize(terrain_controlmap, 0));
-		vec2 pos_texel = UV2 * texSize;
+		vec2 pos_texel = UV2 * texSize + 0.5;
 		vec2 pos_texel00 = floor(pos_texel);
-
+		
 		vec4 mirror = vec4(0.0, 0.0, 1.0, 1.0);
 		mirror.xy = fract(pos_texel00 * 0.5) * 2.0;
 		mirror.zw = vec2(1.0) - mirror.xy;
-		
+	
 		vec2 weights1 = clamp(pos_texel - pos_texel00, 0, 1);
 		weights1 = mix(weights1, vec2(1.0) - weights1, mirror.xy);
 		
 		vec2 weights0 = vec2(1.0) - weights1;
 		
-		vec2 index00UV = (pos_texel00 + mirror.xy) / texSize;
-		vec2 index01UV = (pos_texel00 + mirror.xw) / texSize;
-		vec2 index10UV = (pos_texel00 + mirror.zy) / texSize;
-		vec2 index11UV = (pos_texel00 + mirror.zw) / texSize;
+		ivec2 index00UV = ivec2(pos_texel00 + mirror.xy);
+		ivec2 index01UV = ivec2(pos_texel00 + mirror.xw);
+		ivec2 index10UV = ivec2(pos_texel00 + mirror.zy);
+		ivec2 index11UV = ivec2(pos_texel00 + mirror.zw);
 		
-		vec4 index00 = texture(terrain_controlmap, index00UV);
-		vec4 index01 = texture(terrain_controlmap, index01UV);
-		vec4 index10 = texture(terrain_controlmap, index10UV);
-		vec4 index11 = texture(terrain_controlmap, index11UV);
+		vec4 index00 = texelFetch(terrain_controlmap, index00UV, 0);
+		vec4 index01 = texelFetch(terrain_controlmap, index01UV, 0);
+		vec4 index10 = texelFetch(terrain_controlmap, index10UV, 0);
+		vec4 index11 = texelFetch(terrain_controlmap, index11UV, 0);
 		
 		float scale = 0.0;
 		vec4 in_normal = vec4(0.0);
 		
-		vec3 point = (inverse(VIEW_MATRIX) * vec4(VERTEX, 1)).xyz;
-		vec3 normal = (inverse(VIEW_MATRIX) * vec4(NORMAL, 0)).xyz;
+		vec3 wp = (inverse(VIEW_MATRIX) * vec4(VERTEX, 1)).xyz;
+		vec3 wn = (inverse(VIEW_MATRIX) * vec4(NORMAL, 0)).xyz;
 		
-		color = get_material(UV, index00, index00UV, weights0.x * weights0.y, scale, in_normal, point, normal).rgb;
-		color += get_material(UV, index01, index01UV, weights0.x * weights1.y, scale, in_normal, point, normal).rgb;
-		color += get_material(UV, index10, index10UV, weights1.x * weights0.y, scale, in_normal, point, normal).rgb;
-		color += get_material(UV, index11, index11UV, weights1.x * weights1.y, scale, in_normal, point, normal).rgb;
+		color = get_material(UV, index00, index00UV, weights0.x * weights0.y, scale, in_normal, wp, wn).rgb;
+		color += get_material(UV, index01, index01UV, weights0.x * weights1.y, scale, in_normal, wp, wn).rgb;
+		color += get_material(UV, index10, index10UV, weights1.x * weights0.y, scale, in_normal, wp, wn).rgb;
+		color += get_material(UV, index11, index11UV, weights1.x * weights1.y, scale, in_normal, wp, wn).rgb;
 		
 		scale = 1.0/scale;
-//		rough = in_normal.g * scale;
-		normal = in_normal.raa * scale;
+		rough = in_normal.a * scale;
+		normal = in_normal.rgb * scale;
 		color *= scale;
 
 	}
