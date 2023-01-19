@@ -1,7 +1,7 @@
 shader_type spatial;
 render_mode depth_draw_opaque, diffuse_burley;
 
-uniform float terrain_height = 128.0;
+uniform float terrain_height = 64.0;
 uniform float terrain_size = 1024.0;
 
 uniform bool parallax_enabled = true;
@@ -21,8 +21,7 @@ uniform vec3 texture_3d_projection_array[256];
 uniform vec4 texture_color_array[256];
 
 uniform bool terrain_use_grid = true;
-uniform float terrain_grid_scale = 2.0;
-uniform sampler2D terrain_grid : source_color, filter_linear_mipmap_anisotropic;
+uniform float terrain_grid_scale = 1.0;
 
 varying float camera_distance_fade;
 
@@ -50,16 +49,14 @@ void vertex(){
 	vec3 world_vertex = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	UV2 = (world_vertex.xz / vec2(terrain_size+1.0)) + vec2(0.5);
 	UV = world_vertex.xz * 0.5;
-	VERTEX.y = get_height(UV2) * (VERTEX.y + 1.0); // keep the skirt vertices intact
+	VERTEX.y = get_height(UV2) * (VERTEX.y + 1.0);
 	NORMAL = get_normal(UV2);
 	TANGENT = cross(NORMAL, vec3(0,0,1));
 	BINORMAL = cross(NORMAL, TANGENT);
-//	camera_distance_fade = smoothstep(92, 128, distance(INV_VIEW_MATRIX[3].xyz, world_vertex));
+	camera_distance_fade = smoothstep(92, 128, distance(INV_VIEW_MATRIX[3].xyz, world_vertex));
 }
 
-vec4 depth_blend(vec4 a_value, float a_bump, vec4 b_value, float b_bump, float t) { // unsused
-	// https://www.gamasutra.com
-	// /blogs/AndreyMishkinis/20130716/196339/Advanced_Terrain_Texture_Splatting.php
+vec4 depth_blend(vec4 a_value, float a_bump, vec4 b_value, float b_bump, float t) {
 	float ma = max(a_bump + (1.0 - t), b_bump + t) - 0.1;
 	float ba = max(a_bump + (1.0 - t) - ma, 0.0);
 	float bb = max(b_bump + t - ma, 0.0);
@@ -70,18 +67,14 @@ vec4 depth_blend(vec4 a_value, float a_bump, vec4 b_value, float b_bump, float t
 //	return uv - view.xy * (1.0 - height) * parallax_depth * 0.02;  
 //}
 
-float bbs(float input){
-	return fract(dot(input*input, 251.0));
-}
-
 float random(vec2 input){
 	vec4 a = fract(input.xyxy * (2.0f * vec4(1.3442f, 1.0377f, 0.98848f, 0.75775f)) + input.yxyx);
 	return fract(dot(a*a, vec4(251.0)));
 }
 
 float blend_weights(float weight, float detail){
-	weight = sqrt(weight*0.2);
-	float detailContrast = 4.0f;
+	weight = sqrt(weight*0.3);
+	float detailContrast = 3.0f;
 	float result = max(0.1 * weight, detailContrast * (weight + detail) + 1.0f - (detail + detailContrast));
 	return pow(result, 2.0);
 }
@@ -90,19 +83,13 @@ vec2 rotate(vec2 v, float cosa, float sina) {
 	return vec2(cosa * v.x - sina * v.y, sina * v.x + cosa * v.y);
 }
 
-vec4 get_material(vec2 uv, vec4 index, ivec2 uv_center, float weight, inout float scale, inout vec4 out_normal, in vec3 world_pos, in vec3 world_nor){
-
-	float rand = random(vec2(uv_center)) * TAU;
-	
-	float material = index.r * 255.0;
-	float materialOverlay = index.g * 255.0;
-	float materialBlend = index.b;
-	
-	vec2 rot = normalize(vec2(sin(rand), cos(rand)));
-	
-	vec2 matUV = rotate(uv, rot.x, rot.y) * texture_uv_scale_array[int(material)].xy;
-	
 /////// 3D PROJECTION UV ///////
+
+
+//		vec3 wp = (inverse(VIEW_MATRIX) * vec4(VERTEX, 1)).xyz;
+//		vec3 wn = (inverse(VIEW_MATRIX) * vec4(NORMAL, 0)).xyz;
+		
+
 //	vec2 proj = 0.5 * (world_nor.xz / world_nor.y);
 //	proj = clamp(floor(proj * 7.0 + 7.25), 0, 15);
 //	float projDX = (proj.x - 7.0) / 7.0;
@@ -114,6 +101,17 @@ vec4 get_material(vec2 uv, vec4 index, ivec2 uv_center, float weight, inout floa
 //	float projWeight = clamp(dot(projF, world_nor), 0, 1);
 //	weight *= (projWeight * projWeight + 0.0001);
 
+vec4 get_material(vec2 uv, vec4 index, ivec2 uv_center, float weight, inout float scale, inout vec4 out_normal){
+	
+	float rand = random(vec2(uv_center));
+	float rand_angle = rand * PI;
+	uv += (rand - 0.5) * 2.0;
+
+	float material = index.r * 255.0;
+	float materialOverlay = index.g * 255.0;
+	float materialBlend = index.b;
+	vec2 rot = normalize(vec2(sin(rand_angle), cos(rand_angle)));
+	vec2 matUV = rotate(uv, rot.x, rot.y) * texture_uv_scale_array[int(material)].xy;
 	vec2 ddx = dFdx(matUV);
 	vec2 ddy = dFdy(matUV);
 	
@@ -149,7 +147,13 @@ void fragment() {
 	NORMAL = mat3(VIEW_MATRIX) * get_normal(UV2);
 	
 	if (terrain_use_grid){
-		color = texture(terrain_grid, UV*terrain_grid_scale).rgb;
+		vec2 p = UV*2.0*terrain_grid_scale;
+		vec2 ddx = dFdx(p);
+		vec2 ddy = dFdy(p);
+		vec2 w = max(abs(ddx), abs(ddy)) + 0.01;  
+		vec2 i = 2.0*(abs(fract((p-0.5*w)/2.0)-0.5)-abs(fract((p+0.5*w)/2.0)-0.5))/w;
+		color = vec3((0.5 - 0.5*i.x*i.y)*0.2 + 0.2); 
+
 	} else {
 		
 		vec2 texSize = vec2(textureSize(terrain_controlmap, 0));
@@ -178,13 +182,10 @@ void fragment() {
 		float scale = 0.0;
 		vec4 in_normal = vec4(0.0);
 		
-		vec3 wp = (inverse(VIEW_MATRIX) * vec4(VERTEX, 1)).xyz;
-		vec3 wn = (inverse(VIEW_MATRIX) * vec4(NORMAL, 0)).xyz;
-		
-		color = get_material(UV, index00, index00UV, weights0.x * weights0.y, scale, in_normal, wp, wn).rgb;
-		color += get_material(UV, index01, index01UV, weights0.x * weights1.y, scale, in_normal, wp, wn).rgb;
-		color += get_material(UV, index10, index10UV, weights1.x * weights0.y, scale, in_normal, wp, wn).rgb;
-		color += get_material(UV, index11, index11UV, weights1.x * weights1.y, scale, in_normal, wp, wn).rgb;
+		color = get_material(UV, index00, index00UV, weights0.x * weights0.y, scale, in_normal).rgb;
+		color += get_material(UV, index01, index01UV, weights0.x * weights1.y, scale, in_normal).rgb;
+		color += get_material(UV, index10, index10UV, weights1.x * weights0.y, scale, in_normal).rgb;
+		color += get_material(UV, index11, index11UV, weights1.x * weights1.y, scale, in_normal).rgb;
 		
 		scale = 1.0/scale;
 		rough = in_normal.a * scale;

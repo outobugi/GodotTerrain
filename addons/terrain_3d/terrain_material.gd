@@ -3,17 +3,15 @@ extends Material
 class_name TerrainMaterial3D
 @icon("res://addons/terrain_3d/icons/icon_terrain_material.svg")
 
-# Maybe generate the shader code somwhere here?
+# Maybe generate the shader code somewhere here? Out of sight, out of mind.
 
-## Material used to render [Terrain3D].
+## Material used in [Terrain3D].
 ##
 ## This material is not meant to be edited directly. All needed maps are created automatically.
 
 const _SHADER: Shader = preload("res://addons/terrain_3d/terrain.gdshader")
-const _DEFAULT_GRID_TEXTURE: Texture2D = preload("res://addons/terrain_3d/temp/grid_albedo.png")
 
 var _editor_map_normalmap: ViewportTexture
-var _editor_map_heightmap: ViewportTexture
 
 const LAYERS_MAX: int = 256
 
@@ -47,8 +45,6 @@ var layer_texture_array_albedo: Texture2DArray
 var layer_texture_array_normal: Texture2DArray
 
 func _init():
-	RenderingServer.material_set_shader(get_rid(), _SHADER.get_rid())
-	RenderingServer.shader_set_default_texture_parameter(_SHADER.get_rid(), "terrain_grid", _DEFAULT_GRID_TEXTURE.get_rid())
 	call_deferred("_update")
 	
 func _get_shader_mode():
@@ -102,19 +98,13 @@ func set_resolution(size: int, height: int):
 	_update_normalmap()
 	emit_changed()
 	
-func set_heightmap(map: Texture2D, temp: bool = false):
-	if temp:
-		_editor_map_heightmap = map
-	else:
-		map_heightmap = map
+func set_heightmap(map: Texture2D):
+	map_heightmap = map
 	_update_heightmap()
 	emit_changed()
 	
 func get_heightmap() -> ImageTexture:
 	return map_heightmap
-	
-func _apply_editor_heightmap():
-	map_heightmap.set_image(_editor_map_heightmap.get_image())
 	
 func _update_heightmap():
 	var map_size: int = (resolution_size)+1
@@ -168,13 +158,12 @@ func _update_normalmap():
 func _update_controlmap():
 	if !map_controlmap:
 		map_controlmap = ImageTexture.new()
-		var img: Image = Image.create(2048, 2048, false, Image.FORMAT_RGB8)
+		var img: Image = Image.create(resolution_size / 2, resolution_size / 2, false, Image.FORMAT_RGB8)
 		img.fill(Color(0,0,0,1))
 		map_controlmap.set_image(img)
 		
 	RenderingServer.material_set_param(get_rid(), "terrain_controlmap", map_controlmap.get_rid())
-	RenderingServer.material_set_param(get_rid(), "terrain_weightmap", map_controlmap.get_rid())
-	
+
 func get_controlmap():
 	return map_controlmap
 	
@@ -242,6 +231,9 @@ func _update_layers():
 	_update_values()
 	
 func _update():
+	
+	RenderingServer.material_set_shader(get_rid(), _SHADER.get_rid())
+	
 	_update_heightmap()
 	_update_normalmap()
 	_update_controlmap()

@@ -1,27 +1,29 @@
 @tool
 extends EditorPlugin
 
-const GPUPainter: Script = preload("res://addons/terrain_3d/gpu_painter.gd")
-
 var current_terrain: Terrain3D
-var is_active: bool = false
 
 var mouse_is_pressed: bool = false
 var pending_collision_update: bool = false
 var toolbar: TerrainToolUI
-var gpu_painter: Node
+var gizmo_plugin: Terrain3DGizmoPlugin
+var normalmap_generator: NormalmapGenerator
 
 func _enter_tree():
 	toolbar = TerrainToolUI.new()
 	toolbar.hide()
+	normalmap_generator = NormalmapGenerator.new()
+	gizmo_plugin = Terrain3DGizmoPlugin.new()
+	gizmo_plugin.material = toolbar.GIZMO_MATERIAL # Having the material in toolbar makes it easier to change the brush texture
+	add_node_3d_gizmo_plugin(gizmo_plugin)
+	add_child(normalmap_generator)
 	add_control_to_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_SIDE_RIGHT, toolbar)
-	gpu_painter = GPUPainter.new()
-	add_child(gpu_painter)
 
 func _exit_tree():
 	remove_control_from_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_SIDE_RIGHT, toolbar)
+	remove_node_3d_gizmo_plugin(gizmo_plugin)
 	toolbar.queue_free()
-	gpu_painter.queue_free()
+	normalmap_generator.queue_free()
 	
 func _handles(object: Variant):
 	if object is Terrain3D:
@@ -39,7 +41,7 @@ func _edit(object: Variant):
 		load_materials()
 		load_meshes()
 		
-		gpu_painter.attach_terrain_material(object.get_material())
+		normalmap_generator.load_heightmap_from(object.get_material())
 		
 		if !object.is_connected("material_changed", _terrain_on_material_changed):
 			object.connect("material_changed", _terrain_on_material_changed)
@@ -47,6 +49,7 @@ func _edit(object: Variant):
 			object.connect("resolution_changed", _terrain_on_resolution_changed)
 
 func _clear():
+	
 	if is_terrain_valid():
 		if current_terrain.is_connected("material_changed", _terrain_on_material_changed):
 			current_terrain.disconnect("material_changed", _terrain_on_material_changed)
@@ -55,8 +58,10 @@ func _clear():
 	current_terrain = null
 	
 func _make_visible(visible: bool):
-	is_active = visible
 	toolbar.visible = visible
+	
+	if is_terrain_valid() and !visible:
+		current_terrain.clear_gizmos()
 
 func _apply_changes():
 	if is_terrain_valid():
@@ -65,57 +70,62 @@ func _apply_changes():
 	
 func _forward_3d_gui_input(camera: Camera3D, event: InputEvent):
 	
-	if is_active:
-		if is_terrain_valid():
+	if is_terrain_valid():
+		if event is InputEventMouse:
+			var mouse_pos: Vector2 = event.get_position()
+		
+			var ray_param: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.new()
+			ray_param.set_from(camera.global_transform.origin)
+			ray_param.set_to(camera.project_position(mouse_pos, 1024.0))
 			
-			if event is InputEventMouse:
-				var mouse_pos: Vector2 = event.get_position()
+			var space = current_terrain.get_world_3d().get_space()
+			var ray_data: Dictionary = PhysicsServer3D.space_get_direct_state(space).intersect_ray(ray_param)
 			
-				var ray_param: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.new()
-				ray_param.set_from(camera.global_transform.origin)
+			if !ray_data.is_empty():
 				
-				ray_param.set_to(camera.project_position(mouse_pos, 1024.0))
-				var space = current_terrain.get_world_3d().get_space()
-				var ray_data: Dictionary = PhysicsServer3D.space_get_direct_state(space).intersect_ray(ray_param)
+				gizmo_plugin.gizmo_position = ray_data.position
+				gizmo_plugin.gizmo_size = toolbar.get_brush_size()
+				current_terrain.update_gizmos()
+			
+			var was_pressed: bool = mouse_is_pressed
+			
+			if event is InputEventMouseButton and event.get_button_index() == 1:
+				mouse_is_pressed = event.is_pressed()
 				
-				var was_pressed: bool = mouse_is_pressed
+			if event is InputEventMouseMotion and mouse_is_pressed:
 				
-				if event is InputEventMouseButton and event.get_button_index() == 1:
-					mouse_is_pressed = event.is_pressed()
+				if !ray_data.is_empty():
 					
-				if event is InputEventMouseMotion and mouse_is_pressed:
-					
-					if !ray_data.is_empty():
+					if current_terrain.has_material():
+						var coord: Vector2 = get_coord_from(ray_data.position)
 						
-						if current_terrain.has_material():
-							var uv: Vector2 = get_uv_from(ray_data.position)
-							
-							if toolbar.current_tool == toolbar.Tool.HEIGHT:
-								paint_height(uv)
-								pending_collision_update = true
-							if toolbar.current_tool == toolbar.Tool.TEXTURE:
-								paint_control(uv)
-							
-				if was_pressed and !mouse_is_pressed:
-					if pending_collision_update:
-						pending_collision_update = false
-						current_terrain.update_collision()
-							
-				if mouse_is_pressed:
-					return EditorPlugin.AFTER_GUI_INPUT_STOP
+						if toolbar.current_tool == toolbar.Tool.HEIGHT:
+							paint_height(coord)
+							pending_collision_update = true
+						if toolbar.current_tool == toolbar.Tool.TEXTURE:
+							paint_control(coord)
+						
+			if was_pressed and !mouse_is_pressed:
+				if pending_collision_update:
+					current_terrain.update_collider_heights()
+					pending_collision_update = false
+						
+			if mouse_is_pressed:
+				return EditorPlugin.AFTER_GUI_INPUT_STOP
+				
 
 func is_terrain_valid():
 	return is_instance_valid(current_terrain)
 
 func _terrain_on_material_changed():
-	gpu_painter.attach_terrain_material(current_terrain.get_material())
+	normalmap_generator.load_heightmap_from(current_terrain.get_material())
 	load_materials()
 	
 func _terrain_on_resolution_changed():
-	gpu_painter.update_resolution(current_terrain.get_size(), current_terrain.get_height())
+	normalmap_generator.update_resolution(current_terrain.get_size(), current_terrain.get_height())
 
-func get_uv_from(pos: Vector3):
-	return (Vector2(pos.x, pos.z) / float(current_terrain.size)) + Vector2(0.5, 0.5)
+func get_coord_from(pos: Vector3):
+	return (Vector2(pos.x, pos.z) + (Vector2(current_terrain.size, current_terrain.size) / 2.0))
 	
 func rotate_uv(uv: Vector2, rotation: float):
 	var rotation_offset = Vector2(0.5,0.5)
@@ -136,7 +146,7 @@ func load_materials():
 func load_meshes():
 	var meshes: Array[Array]
 	if is_terrain_valid():
-		meshes = current_terrain.get_particle_meshes()
+		meshes = current_terrain.get_detail_meshes()
 	toolbar.load_meshes(meshes, on_mesh_changed)
 
 func on_material_changed(material: TerrainLayerMaterial3D, layer: int, inspect: bool):
@@ -154,41 +164,42 @@ func on_mesh_changed(mesh: Mesh, layer: int, index: int, inspect: bool = false):
 	if is_terrain_valid():
 		if !inspect:
 			if current_terrain.has_material():
-				current_terrain.set_particle_mesh(mesh, layer, index)
+				current_terrain.set_detail_mesh(mesh, layer, index)
 			call_deferred("load_meshes")
 			if !mesh:
 				get_editor_interface().inspect_object(current_terrain, "", true)
 		else:
 			get_editor_interface().inspect_object(mesh, "", true)
 		
-func paint_height(uv: Vector2):
+func paint_height(coord: Vector2):
 	var heightmap: ImageTexture = current_terrain.get_material().get_heightmap()
 	var heightmap_img: Image = heightmap.get_image()
 	var heightmap_size: Vector2i = heightmap_img.get_size()
 	
-	var brush_size = toolbar.get_brush_size()
-	var brush_shape = toolbar.get_brush_shape()
-	var brush_shape_size = brush_shape.get_size()
-	var brush_opacity = toolbar.get_brush_opacity()
-	var brush_flow = toolbar.get_brush_flow()
+	var brush_size: int = toolbar.get_brush_size()
+	var brush_shape: Image = toolbar.get_brush_shape()
+	var brush_shape_size: Vector2i = brush_shape.get_size()
+	var brush_opacity: float = toolbar.get_brush_opacity()
+	var brush_flow: float = toolbar.get_brush_flow()
 	
-	var rand_rotation = PI * randf()
+	var rand_rotation: float = PI * randf()
 	
 	for x in brush_size:
 		for y in brush_size:
-			var brush_center = brush_size / 2
+			var brush_center: int = brush_size / 2
 
 			var brush_shape_uv: Vector2 = Vector2(x,y) / brush_size
 			brush_shape_uv = rotate_uv(brush_shape_uv, rand_rotation)
-			var brush_pixel: Vector2i = Vector2i(brush_shape_uv * Vector2(brush_shape_size))
-			brush_pixel = brush_pixel.clamp(Vector2i.ZERO, brush_shape_size - Vector2i.ONE)
 			
 			var brush_offset: Vector2i = Vector2i(x, y) - Vector2i(brush_center, brush_center)
-			var brush_position: Vector2i = Vector2i(Vector2(heightmap_size) * uv)
-			var pixel_position: Vector2i = (brush_position + brush_offset)
+			var brush_position: Vector2i = Vector2i(Vector2(heightmap_size) * (coord / current_terrain.size))
+			var pixel_position: Vector2i = brush_position + brush_offset
 			
 			if is_in_bounds(pixel_position, heightmap_size):
-				var alpha: float = brush_shape.get_pixelv(brush_pixel).r
+				var brush_pixel_position: Vector2i = Vector2i(brush_shape_uv * Vector2(brush_shape_size))
+				brush_pixel_position = brush_pixel_position.clamp(Vector2i.ZERO, brush_shape_size - Vector2i.ONE)
+				
+				var alpha: float = brush_shape.get_pixelv(brush_pixel_position).r
 				var source: float = heightmap_img.get_pixelv(pixel_position).r
 				var target: float = source
 				
@@ -207,38 +218,40 @@ func paint_height(uv: Vector2):
 				heightmap_img.set_pixelv(pixel_position, Color(clamp(target, 0, 1), 0, 0, 1))
 	
 	heightmap.set_image(heightmap_img)
-	gpu_painter.refresh_normalmap()
+	normalmap_generator.refresh_normalmap()
 	
-func paint_control(uv: Vector2):
+func paint_control(coord: Vector2):
+	
 	var controlmap: ImageTexture = current_terrain.get_material().get_controlmap()
 	var controlmap_img: Image = controlmap.get_image()
 	var controlmap_size: Vector2i = controlmap.get_size()
 	
-	var brush_size = toolbar.get_brush_size()
-	var brush_shape = toolbar.get_brush_shape()
-	var brush_shape_size = brush_shape.get_size()
-	var brush_opacity = toolbar.get_brush_opacity()
-	var brush_flow = toolbar.get_brush_flow()
+	var brush_size: int = toolbar.get_brush_size() / (current_terrain.size / controlmap_size.x)
+	var brush_shape: Image = toolbar.get_brush_shape()
+	var brush_shape_size: Vector2i = brush_shape.get_size()
+	var brush_opacity: float = toolbar.get_brush_opacity()
+	var brush_flow: float = toolbar.get_brush_flow()
 
 	var layer_index: int = toolbar.get_material_layer()
 	# Max is 255 (256 because 0 is first)
 	
-	var rand_rotation = PI * randf()
+	var rand_rotation: float = PI * randf()
 	
 	for x in brush_size:
 		for y in brush_size:
 			var brush_center = brush_size / 2
 			var brush_shape_uv: Vector2 = Vector2(x,y) / brush_size
 			brush_shape_uv = rotate_uv(brush_shape_uv, rand_rotation)
-			var brush_pixel: Vector2i = Vector2i(brush_shape_uv * Vector2(brush_shape_size))
-			brush_pixel = brush_pixel.clamp(Vector2i.ZERO, brush_shape_size - Vector2i.ONE)
 			
 			var brush_offset: Vector2i = Vector2i(x, y) - Vector2i(brush_center, brush_center)
-			var brush_position: Vector2i = Vector2i(Vector2(controlmap_size) * uv)
+			var brush_position: Vector2i = Vector2i(Vector2(controlmap_size) * (coord / current_terrain.size))
 			var pixel_position: Vector2i = (brush_position + brush_offset)
 			
 			if is_in_bounds(pixel_position, controlmap_size):
-				var alpha: float = brush_shape.get_pixelv(brush_pixel).r
+				var brush_pixel_position: Vector2i = Vector2i(brush_shape_uv * Vector2(brush_shape_size))
+				brush_pixel_position = brush_pixel_position.clamp(Vector2i.ZERO, brush_shape_size - Vector2i.ONE)
+			
+				var alpha: float = brush_shape.get_pixelv(brush_pixel_position).r
 				var index_mask: float = 1.0 if alpha > 0.5 else 0.0
 				var source_color: Color = controlmap_img.get_pixelv(pixel_position)
 				var target_color: Color = source_color # Color(layer1, layer2, blend, unused)
@@ -255,22 +268,99 @@ func paint_control(uv: Vector2):
 
 				controlmap_img.set_pixelv(pixel_position, target_color)
 	
-	current_terrain.get_material().get_controlmap().set_image(controlmap_img)
+	controlmap.set_image(controlmap_img)
 	
+	
+	
+## GIZMO ##
+	
+class Terrain3DGizmoPlugin extends EditorNode3DGizmoPlugin:
+	
+	var material: ShaderMaterial
+	var mesh: BoxMesh = BoxMesh.new()
+	
+	var gizmo_position: Vector3
+	var gizmo_size: float
+	
+	func _get_gizmo_name():
+		return "Terrain3D"
+		
+	func _has_gizmo(for_node_3d: Node3D):
+		return for_node_3d is Terrain3D
+		
+	func _redraw(gizmo: EditorNode3DGizmo):
+		
+		gizmo.clear()
+		var t: Transform3D = Transform3D(Basis.from_scale(Vector3.ONE * gizmo_size), gizmo_position)
+		gizmo.add_mesh(mesh, material, t)
 
-# UI
+## VIEWPORT RENDERING ##
+class NormalmapGenerator extends Node:
+	
+	const NORMALMAP_SHADER: Shader = preload("res://addons/terrain_3d/height_to_normal.gdshader")
+	var viewport_normalmap: SubViewport
+	var canvas_normalmap: Sprite2D
+
+	func _ready():
+		viewport_normalmap = SubViewport.new()
+		setup_viewport(viewport_normalmap)
+		canvas_normalmap = Sprite2D.new()
+		canvas_normalmap.centered = false
+		var nmap_mat: ShaderMaterial = ShaderMaterial.new()
+		nmap_mat.shader = NORMALMAP_SHADER
+		canvas_normalmap.material = nmap_mat
+		viewport_normalmap.add_child(canvas_normalmap)
+		add_child(viewport_normalmap)
+		
+	func setup_viewport(viewport: SubViewport):
+		viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
+		viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+		viewport.world_2d = World2D.new()
+		viewport.disable_3d = true
+		
+	func load_heightmap_from(material: TerrainMaterial3D):
+		
+		if material:
+			var heightmap = material.get_heightmap()
+			canvas_normalmap.set_texture(heightmap)
+			canvas_normalmap.get_material().set_shader_parameter("height", float(material.get_height()))
+			
+			var _size: Vector2i = Vector2i(heightmap.get_size())
+		
+			if viewport_normalmap.size != _size:
+				viewport_normalmap.size = _size
+				
+			refresh_normalmap()
+				
+			await RenderingServer.frame_post_draw
+				
+			material.set_normalmap(viewport_normalmap.get_texture(), true)
+		
+	func update_resolution(size: int, height: int):
+		canvas_normalmap.get_material().set_shader_parameter("height", float(height))
+		viewport_normalmap.size = Vector2i(size, size)
+		refresh_normalmap()
+
+	func clear():
+		canvas_normalmap.set_texture(null)
+		
+	func refresh_normalmap():
+		viewport_normalmap.render_target_update_mode = SubViewport.UPDATE_ONCE
+
+## UI ##
 
 class TerrainToolUI extends MarginContainer:
 
 	const BRUSH_PREVIEW_MATERIAL: ShaderMaterial = preload("res://addons/terrain_3d/ui/brush_preview.material")
+	const GIZMO_MATERIAL: ShaderMaterial = preload("res://addons/terrain_3d/ui/gizmo.material")
 	const ICON_SCULPT: Texture = preload("res://addons/terrain_3d/icons/icon_height_brush.svg")
 	const ICON_PAINT: Texture = preload("res://addons/terrain_3d/icons/icon_brush.svg")
-	const ICON_PARTICLE: Texture = preload("res://addons/terrain_3d/icons/icon_multimesh.svg")
+	const ICON_DETAIL: Texture = preload("res://addons/terrain_3d/icons/icon_multimesh.svg")
 
 	enum Tool {
 		HEIGHT,
 		TEXTURE,
-		PARTICLE,
+		detail,
 		NONE
 	}
 
@@ -281,11 +371,11 @@ class TerrainToolUI extends MarginContainer:
 		HEIGHT_LEVEL,
 		TEXTURE_REPLACE,
 		TEXTURE_BLEND,
-		PARTICLE_MASK,
+		detail_MASK,
 		MAX
 	}
 
-	const MAX_BRUSH_SIZE: int = 512
+	const MAX_BRUSH_SIZE: int = 200
 
 	var current_tool: Tool = Tool.NONE
 	var current_mode: Mode = Mode.MAX
@@ -329,10 +419,10 @@ class TerrainToolUI extends MarginContainer:
 		tool_texture.icon = ICON_PAINT
 		tool_texture.text = " Paint"
 		tool_buttons.add_child(tool_texture)
-		var tool_particle: Button = Button.new()
-		tool_particle.icon = ICON_PARTICLE
-		tool_particle.text = " Detail"
-		tool_buttons.add_child(tool_particle)
+		var tool_detail: Button = Button.new()
+		tool_detail.icon = ICON_DETAIL
+		tool_detail.text = " Detail"
+		tool_buttons.add_child(tool_detail)
 
 		for button in tool_buttons.get_children():
 			button.toggle_mode = true
@@ -340,15 +430,16 @@ class TerrainToolUI extends MarginContainer:
 			button.size_flags_horizontal = SIZE_EXPAND_FILL
 			
 		material_layers = LayerListContainer.new("Layers")
-		mesh_layers = LayerListContainer.new("Particles")
+		mesh_layers = LayerListContainer.new("Details")
 		
 		tool_height.connect("toggled", set_tool.bind(Tool.HEIGHT))
 		tool_texture.connect("toggled", set_tool.bind(Tool.TEXTURE))
-		tool_particle.connect("toggled", set_tool.bind(Tool.PARTICLE))
+		tool_detail.connect("toggled", set_tool.bind(Tool.detail))
 		tool_height.set_pressed(true)
 		set_tool(true, Tool.HEIGHT)
 		
 		brush_mode_option.get_type_control().connect("item_selected", set_mode)
+		brush_shape_button_group.connect("pressed", _on_brush_shape_changed)
 		
 		vbox.add_child(tool_buttons)
 		vbox.add_child(HSeparator.new())
@@ -360,15 +451,14 @@ class TerrainToolUI extends MarginContainer:
 		vbox.add_child(brush_flow_slider)
 		vbox.add_child(material_layers)
 		vbox.add_child(mesh_layers)
+
+		call_deferred("load_default_values")
 		
-		load_brushes()
-		
-		call_deferred("laod_default_values")
-		
-	func laod_default_values():
+	func load_default_values():
 		set_brush_size(64)
 		set_brush_opacity(50)
 		set_brush_flow(25)
+		load_brushes()
 
 	func load_brushes():
 		var path: String = "res://addons/terrain_3d/brush/"
@@ -426,7 +516,6 @@ class TerrainToolUI extends MarginContainer:
 
 			match tool:
 				Tool.HEIGHT:
-					
 					for mode in Mode.MAX:
 						var mode_name = Mode.keys()[mode]
 						if mode_name.begins_with("HEIGHT_"):
@@ -437,7 +526,6 @@ class TerrainToolUI extends MarginContainer:
 					
 				Tool.TEXTURE:
 					material_layers.show()
-					
 					for mode in Mode.MAX:
 						var mode_name = Mode.keys()[mode]
 						if mode_name.begins_with("TEXTURE_"):
@@ -446,7 +534,7 @@ class TerrainToolUI extends MarginContainer:
 							
 					set_mode(options.get_item_index(Mode.TEXTURE_REPLACE))
 							
-				Tool.PARTICLE:
+				Tool.detail:
 					mesh_layers.show()
 					
 				
@@ -502,7 +590,12 @@ class TerrainToolUI extends MarginContainer:
 		
 	func get_material_layer():
 		return current_material_layer
-
+		
+	func _on_brush_shape_changed(brush_shape: Button):
+		var img: Image = brush_shape.get_button_icon().get_image()
+		var texture: ImageTexture = GIZMO_MATERIAL.get_shader_parameter("brush_shape")
+		texture.set_image(img)
+		
 	func _on_material_layer_selected(id: int):
 		for layer in material_layers.get_list().get_children():
 			if layer.id != id:

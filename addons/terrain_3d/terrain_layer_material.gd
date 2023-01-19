@@ -106,7 +106,7 @@ func _texture_is_valid(texture: Texture2D):
 	if texture:
 		var format: int = texture.get_image().get_format()
 		var format_name: String = ClassDB.class_get_enum_constants("Image", "Format")[format]
-		if texture.get_image().get_format() != Image.FORMAT_DXT5:
+		if format != Image.FORMAT_DXT5:
 			printerr("Invalid format. " + "(" + format_name + ")" + " Expected DXT5 RGBA8.")
 			return false
 	return true

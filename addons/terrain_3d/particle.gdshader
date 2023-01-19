@@ -30,7 +30,6 @@ vec3 unpack_normal(vec4 rgba) {
 void process() {
 	
 	float count_sqrt = sqrt(float(instance_count));
-
 	float spacing = float(instance_density) / 2.0;
 	
 	vec3 pos = vec3(0.0, 0.0, 0.0);

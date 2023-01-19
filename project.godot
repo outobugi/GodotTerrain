@@ -15,6 +15,11 @@ _global_script_classes=[{
 "path": "res://addons/terrain_3d/terrain.gd"
 }, {
 "base": "Material",
+"class": &"TerrainDetailMaterial3D",
+"language": &"GDScript",
+"path": "res://addons/terrain_3d/terrain_detail_material.gd"
+}, {
+"base": "Material",
 "class": &"TerrainLayerMaterial3D",
 "language": &"GDScript",
 "path": "res://addons/terrain_3d/terrain_layer_material.gd"
@@ -26,6 +31,7 @@ _global_script_classes=[{
 }]
 _global_script_class_icons={
 "Terrain3D": "res://addons/terrain_3d/icons/icon_terrain.svg",
+"TerrainDetailMaterial3D": "",
 "TerrainLayerMaterial3D": "res://addons/terrain_3d/icons/icon_terrain_layer_material.svg",
 "TerrainMaterial3D": "res://addons/terrain_3d/icons/icon_terrain_material.svg"
 }
