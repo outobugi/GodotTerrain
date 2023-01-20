@@ -1,6 +1,16 @@
-# Terrain for Godot 4
-Very much work in progress.
+# Terrain For Godot 4
+Terrain and editor written in GDScript.
 
-!DO NOT USE IN PRODUCTION!
+### Features
+- Geomipmap LOD
+- 256 Textures
+- Double layer blending
+- Anti-tiling
+- Constant 19 texture lookups (16 textures, 3 maps)
 
-Setting height/size/section_size does nothing right now. Locked to 1K size. Will be fixed soon.
+### TODO
+- Grass/detail instancing
+- Texture 3D Projection (commented out in shader for now)
+- Cull texture lookups based on blend weight (reduces lookups by ~50%)
+- Macro variation texture
+- GDExtension version
