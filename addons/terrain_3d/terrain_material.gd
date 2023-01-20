@@ -80,6 +80,9 @@ func set_size(size: int):
 	_update_normalmap()
 	emit_changed()
 	
+func get_size() -> int:
+	return resolution_size
+	
 func set_height(height: int):
 	resolution_height = height
 	_update_normalmap()

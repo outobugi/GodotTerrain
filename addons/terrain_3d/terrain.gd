@@ -20,9 +20,10 @@ const _EDITOR_COLLISION_SIZE: int = 256
 
 var _update_pending: bool = false
 
-@export_enum("512:512", "1024:1024", "2048:2048", "4096:4096", "8192:8192") var size: int = 1024 :
+var size: int = 1024 :
 	set = set_size, get = get_size
-@export_range(1,512) var height: int = 64 :
+	
+var height: int = 64 :
 	set = set_height, get = get_height
 	
 @export_group("Section", "section_")
@@ -73,8 +74,12 @@ func _get_configuration_warnings():
 			
 func set_size(value: int):
 	if value != size:
+		
 		size = value
 		emit_signal("resolution_changed")
+		
+		clear(true, true, false)
+		build(size, section_size, lod_count)
 
 func get_size():
 	return size
@@ -82,6 +87,11 @@ func get_size():
 func set_height(value: int):
 	if value != height:
 		height = value
+		
+		if surface_material:
+			surface_material.set_height(height)
+		
+		call_deferred("update_collider_heights")
 		emit_signal("resolution_changed")
 	
 func get_height():
@@ -91,13 +101,28 @@ func set_section_size(value: int):
 	if value != section_size:
 		section_size = value
 		
+		clear(true, false, false)
+		build(size, section_size, lod_count)
+
 func set_lod_count(value: int):
 	if value != lod_count:
 		lod_count = value
 		
+		clear(true, false, false)
+		build(size, section_size, lod_count)
+		
 func set_lod_distance(value: float):
 	if value != lod_distance:
 		lod_distance = value
+		
+		for section in grid:
+			var lod: int = 0
+			for instance in section:
+				var min: float = float(lod * section_size) + float(lod_distance) if lod > 0 else float(lod * section_size)
+				var max = 0.0 if lod == lod_count - 1 else float((lod + 1) * section_size + lod_distance)
+				lod += 1
+				
+				RenderingServer.instance_geometry_set_visibility_range(instance, min, max, 0.0, 0.0, RenderingServer.VISIBILITY_RANGE_FADE_DISABLED)
 		
 func set_detail_draw_distance(value: int):
 	detail_draw_distance = value
@@ -131,24 +156,28 @@ func get_detail_meshes():
 ## Sets the [TerrainMaterial3D] to all LOD meshes.
 func set_material(material: TerrainMaterial3D):
 	
-	surface_material = material
-	
-	if !surface_material.get_path().is_valid_filename():
-		push_warning("Material is not saved to disk. Save it as .res or .material!")
-	
-	if surface_material:
-		surface_material.call_deferred("set_height", height)
-		surface_material.call_deferred("set_size", size)
+	if material:
+		var path: String = material.get_path()
+		var is_saved: bool = path.ends_with(".material") or path.ends_with(".res")
 		
-	call_deferred("emit_signal", "material_changed")
+		if !is_saved:
+			push_warning("Material is not saved to disk. Save it as .res or .material!")
+			material.call_deferred("set_size", size)
+		else:
+			set_size(material.get_size())
+		
+		material.call_deferred("set_height", height)
 	
 	var rid: RID = RID() if !material else material.get_rid()
 	
 	for mesh in meshes:
 		RenderingServer.mesh_surface_set_material(mesh, 0, rid)
-		
+
 	update_configuration_warnings()
+	notify_property_list_changed()
 	
+	surface_material = material
+	call_deferred("emit_signal", "material_changed")
 	call_deferred("update_collider_heights")
 	
 ## Returns the assigned [TerrainMaterial3D]
@@ -386,7 +415,27 @@ func _notification(what):
 				PhysicsServer3D.body_set_space(body, RID())
 
 func _get_property_list():
+	
+	var property_usage: int = PROPERTY_USAGE_DEFAULT
+	
+	if has_material():
+		property_usage = PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY
+	
 	var property_list: Array = [
+		{
+			"name": "size",
+			"type": TYPE_INT,
+			"hint_string": "512:512, 1024:1024, 2048:2048, 4096:4096, 8192:8192",
+			"hint": PROPERTY_HINT_ENUM,
+			"usage": property_usage,
+		},
+		{
+			"name": "height",
+			"type": TYPE_INT,
+			"hint_string": "1, 8192",
+			"hint": PROPERTY_HINT_RANGE,
+			"usage": PROPERTY_USAGE_DEFAULT,
+		},
 		{
 			"name": "particle_mesh_array",
 			"type": TYPE_ARRAY,
@@ -398,6 +447,7 @@ func _get_property_list():
 			"usage": PROPERTY_USAGE_STORAGE,
 		},
 	]
+	
 	return property_list
 
 func create_section_mesh(p_size: int, p_subdivision: int, p_material: RID):
@@ -497,4 +547,5 @@ func create_section_mesh(p_size: int, p_subdivision: int, p_material: RID):
 	
 	var mesh: RID = RenderingServer.mesh_create()
 	RenderingServer.mesh_add_surface_from_arrays(mesh, RenderingServer.PRIMITIVE_TRIANGLES, arrays)
+	RenderingServer.mesh_surface_set_material(mesh, 0, p_material)
 	return mesh
