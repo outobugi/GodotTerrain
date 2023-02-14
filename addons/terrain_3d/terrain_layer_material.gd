@@ -1,7 +1,7 @@
 @tool
-@icon("res://addons/terrain_3d/icons/icon_terrain_layer_material.svg")
 extends Material
 class_name TerrainLayerMaterial3D
+@icon("res://addons/terrain_3d/icons/icon_terrain_layer_material.svg")
 
 ## Material used in [TerrainMaterial3D].
 ##
@@ -17,7 +17,7 @@ enum TextureParam{
 
 var albedo_color: Color = Color.WHITE :
 	set = set_albedo
-
+	
 var albedo_texture: Texture2D :
 	set(value):
 		if _texture_is_valid(value):
@@ -41,13 +41,13 @@ var _shader: RID
 
 func _init():
 	_update_shader()
-
+	
 func set_albedo(color: Color):
 	albedo_color = color
 	RenderingServer.material_set_param(get_rid(), "albedo_color", albedo_color)
 	emit_changed()
 	emit_signal("value_changed")
-
+	
 func get_albedo():
 	return albedo_color
 
@@ -56,7 +56,7 @@ func set_normal_scale(scale: float):
 	RenderingServer.material_set_param(get_rid(), "normal_scale", normal_scale)
 	emit_changed()
 	emit_signal("value_changed")
-
+	
 func get_normal_scale():
 	return normal_scale
 
@@ -65,10 +65,10 @@ func set_uv_scale(scale: Vector3):
 	RenderingServer.material_set_param(get_rid(), "uv_scale", uv_scale)
 	emit_changed()
 	emit_signal("value_changed")
-
+	
 func get_uv_scale():
 	return uv_scale
-
+	
 func enable_anti_tile(enable: bool):
 	uv_anti_tile = enable
 	RenderingServer.material_set_param(get_rid(), "uv_anti_tile", uv_anti_tile)
@@ -76,10 +76,10 @@ func enable_anti_tile(enable: bool):
 	emit_signal("value_changed")
 
 func set_texture(param: TextureParam, texture: Texture2D):
-
+	
 	var string_param: String
 	var rid: RID
-
+	
 	if texture:
 		rid = texture.get_rid()
 
@@ -93,7 +93,7 @@ func set_texture(param: TextureParam, texture: Texture2D):
 	RenderingServer.material_set_param(get_rid(), string_param, rid)
 	emit_changed()
 	emit_signal("texture_changed")
-
+	
 func get_texture(param: TextureParam):
 	match param:
 		TextureParam.TEXTURE_ALBEDO:
@@ -101,7 +101,7 @@ func get_texture(param: TextureParam):
 		TextureParam.TEXTURE_NORMAL:
 			return normal_texture
 	return null
-
+	
 func _texture_is_valid(texture: Texture2D):
 	if texture:
 		var format: int = texture.get_image().get_format()
@@ -110,7 +110,7 @@ func _texture_is_valid(texture: Texture2D):
 			printerr("Invalid format. " + "(" + format_name + ")" + " Expected DXT5 RGBA8.")
 			return false
 	return true
-
+	
 func _get_shader_mode():
 	return Shader.MODE_SPATIAL
 
@@ -132,17 +132,17 @@ func _update_shader():
 	code += "void fragment(){\n"
 	code += "	ALBEDO=texture(albedo_texture, UV).rgb * albedo_color.rgb;\n"
 	code += "	vec4 normal_map =texture(normal_texture, UV);\n"
-
+	
 	if normal_texture:
 		code += "	NORMAL_MAP=normal_map.rgb;\n"
 		code += "	ROUGHNESS=normal_map.a;\n"
-
+	
 	code += "}\n"
-
+	
 	_shader = RenderingServer.shader_create()
 	RenderingServer.shader_set_code(_shader, code)
 	RenderingServer.material_set_shader(get_rid(), _shader)
-
+	
 func _get_property_list():
 	var property_list: Array = [
 		{
@@ -201,3 +201,5 @@ func _get_property_list():
 		},
 	]
 	return property_list
+	
+	
