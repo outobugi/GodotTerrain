@@ -1,7 +1,7 @@
 @tool
+@icon("res://addons/terrain_3d/icons/icon_terrain_material.svg")
 extends Material
 class_name TerrainMaterial3D
-@icon("res://addons/terrain_3d/icons/icon_terrain_material.svg")
 
 # Maybe generate the shader code somewhere here? Out of sight, out of mind.
 

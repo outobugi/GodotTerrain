@@ -1,7 +1,7 @@
 @tool
+@icon("res://addons/terrain_3d/icons/icon_terrain_layer_material.svg")
 extends Material
 class_name TerrainLayerMaterial3D
-@icon("res://addons/terrain_3d/icons/icon_terrain_layer_material.svg")
 
 ## Material used in [TerrainMaterial3D].
 ##
