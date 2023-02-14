@@ -1,7 +1,7 @@
 @tool
+@icon("res://addons/terrain_3d/icons/icon_terrain.svg")
 class_name Terrain3D
 extends Node3D
-@icon("res://addons/terrain_3d/icons/icon_terrain.svg")
 
 ## Terrain3D creates a grid of MeshInstance3D's with varying LOD meshes.
 ##
