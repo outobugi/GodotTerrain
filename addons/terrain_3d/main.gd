@@ -25,12 +25,12 @@ func _exit_tree():
 	toolbar.queue_free()
 	normalmap_generator.queue_free()
 	
-func _handles(object: Variant):
+func _handles(object: Object):
 	if object is Terrain3D:
 		return true
 	return false
 	
-func _edit(object: Variant):
+func _edit(object: Object):
 	if object is Terrain3D:
 		
 		if object == current_terrain:
