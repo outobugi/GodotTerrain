@@ -1,3 +1,5 @@
+### New, better terrain system [Terrain3D C++](https://github.com/outobugi/Terrain3D)
+
 # Terrain For Godot 4
 Terrain and editor written in GDScript.
 
@@ -13,4 +15,3 @@ Terrain and editor written in GDScript.
 - Texture 3D Projection (commented out in shader for now)
 - Cull texture lookups based on blend weight (reduces lookups by ~50%)
 - Macro variation texture
-- GDExtension version
